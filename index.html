@@ -208,192 +208,218 @@
 "use strict";
 
 // ============================================================
-//  ===== PANELING ENGINE START =====  (uniformity + 5 choices, v3)
+//  ===== PANELING ENGINE START =====  (repeating units, v5)
 // ============================================================
 // ============================================================
-//  EGS Paneling engine v3 — uniformity + choices
-//  Objective: joints spread evenly, never too close (2 bays preferred,
-//  1 bay when required, no clustering). Generate many candidates of
-//  varied character, score, return the 5 best that differ from each other.
+//  EGS Paneling engine v5 — candidate rows + clean tiling
+//  6 options: two 3-row, two 4-row, two 5-row repeating units.
+//  Method: generate a POOL of legal, well-spaced candidate rows,
+//  then ASSEMBLE each unit from rows that tile cleanly (no stacked
+//  seam) with good width coverage and >=1 row reaching both walls.
 // ============================================================
 "use strict";
 
 function buildTrusses(runIn, offset, oc){
-  var t=[]; for (var p=offset;p<=runIn+0.01;p+=oc){ t.push(Math.round(p*100)/100); } return t;
-}
-function nearestTrussIdx(trusses,target){
-  var bi=-1,bd=1e9; for(var i=0;i<trusses.length;i++){var d=Math.abs(trusses[i]-target);if(d<bd){bd=d;bi=i;}} return bi;
+  var t=[]; for(var p=offset;p<=runIn+0.01;p+=oc){ t.push(Math.round(p*100)/100); } return t;
 }
 function segLengths(trusses,jointIdx,runIn){
   var pts=[0].concat(jointIdx.map(function(i){return trusses[i];})).concat([runIn]);
   var s=[]; for(var k=1;k<pts.length;k++){ s.push(Math.round((pts[k]-pts[k-1])*100)/100); } return s;
 }
 function maxSeg(segs){ return segs.reduce(function(m,s){return s>m?s:m;},0); }
+function minSeg(segs){ return segs.reduce(function(m,s){return s<m?s:m;},1e9); }
 
-// how many joints for a good-looking division (>=2 on runs long enough to stagger)
 function jointCount(runIn, capIn){
-  if (runIn<=capIn) return 0;
-  var minJ=Math.ceil(runIn/capIn)-1, TARGET=Math.min(120,capIn), lo=minJ;
-  if (lo<2){ if (runIn/3>=72) lo=2; else lo=Math.max(1,minJ); }
-  var best=lo,bs=1e9;
-  for (var n=lo;n<=lo+3;n++){ if(n<1)continue; var seg=runIn/(n+1); if(seg>capIn+0.01)continue; if(seg<48)continue; var sc=Math.abs(seg-TARGET); if(sc<bs){bs=sc;best=n;} }
+  if(runIn<=capIn) return 0;
+  var minJ=Math.ceil(runIn/capIn)-1, lo=minJ;
+  if(lo<2){ if(runIn/3>=72) lo=2; else lo=Math.max(1,minJ); }
+  var TARGET=Math.min(120,capIn), best=lo, bs=1e9;
+  for(var n=lo;n<=lo+3;n++){ if(n<1)continue; var seg=runIn/(n+1); if(seg>capIn+0.01)continue; if(seg<48)continue; var sc=Math.abs(seg-TARGET); if(sc<bs){bs=sc;best=n;} }
   return best;
 }
-function dedupeSorted(arr,n){
-  arr=arr.slice().sort(function(a,b){return a-b;}); var out=[];
-  for(var i=0;i<arr.length;i++){var v=arr[i]; if(out.length&&v<=out[out.length-1])v=out[out.length-1]+1; if(v>n-1)v=n-1; if(!out.length||v>out[out.length-1])out.push(v);} return out;
+function minGapBetween(a,b){
+  if(!a.length||!b.length) return 9;
+  var m=1e9; a.forEach(function(x){ b.forEach(function(y){ m=Math.min(m,Math.abs(x-y)); }); }); return m;
 }
+function key(row){ return row.join(","); }
 
-// legal placement: given desired truss indices, guarantee no segment > cap by
-// walking and inserting forced joints where a gap is too big.
-function makeLegal(trusses,runIn,capIn,desired){
-  desired=dedupeSorted(desired,trusses.length);
-  var result=[],lastPos=0,di=0;
-  function furthest(from){var b=-1;for(var i=0;i<trusses.length;i++){if(trusses[i]<=from)continue;if(trusses[i]-from<=capIn)b=i;else break;}return b;}
-  var q=desired.slice();
-  var guard=0;
-  while(guard++<500){
-    var nd=q.length?q[0]:null;
-    if(nd!==null && trusses[nd]-lastPos<=capIn){
-      if(trusses[nd]>lastPos){result.push(nd);lastPos=trusses[nd];}
-      q.shift();
-    } else {
-      if(runIn-lastPos<=capIn) break;
-      var f=furthest(lastPos); if(f===-1)break;
-      if(result.length&&f<=result[result.length-1]){ if(q.length)q.shift(); continue; }
-      result.push(f); lastPos=trusses[f];
-      while(q.length&&trusses[q[0]]<=lastPos)q.shift();
-    }
-    if(!q.length&&runIn-lastPos<=capIn)break;
-    if(result.length>trusses.length)break;
-  }
-  return dedupeSorted(result,trusses.length);
-}
-
-// Build one candidate layout given a "recipe" that controls character:
-//   startPhase: initial shift, swingSet: array of per-row shifts to cycle,
-//   jitter: whether to add small pseudo-random variation (seeded)
-function buildCandidate(trusses,runIn,capIn,rows,recipe){
-  var need=jointCount(runIn,capIn);
-  var rowJoints=[];
-  var seed=recipe.seed||1;
-  function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
+// ---- generate ALL legal candidate rows with `need` joints, where joints are
+//      >= minInRow bays apart, on trusses 1..nT-2 (never on the wall trusses),
+//      and every segment <= cap. Enumerate combinations (nT small, cheap). ----
+function candidateRows(trusses,runIn,capIn,need,minInRow){
   var nT=trusses.length;
-  for(var r=0;r<rows;r++){
-    if(need===0){ rowJoints.push([]); continue; }
-    var base=[];
-    for(var k=1;k<=need;k++){ base.push(nearestTrussIdx(trusses, runIn*k/(need+1))); }
-    // character: shift the whole set by the recipe's per-row swing
-    var swing=recipe.swings[(r+recipe.startPhase)%recipe.swings.length];
-    var jit=0;
-    if(recipe.jitter){ jit = (rnd()<0.5?-1:1) * (rnd()<recipe.jitterAmt?1:0); }
-    var desired=base.map(function(idx,t){
-      var v=idx+swing+ (t%2===0?jit:-jit);
-      if(v<1)v=1; if(v>nT-2)v=nT-2; return v;
-    });
-    desired=dedupeSorted(desired,nT);
-    var legal=makeLegal(trusses,runIn,capIn,desired);
-    // if empty (shouldn't when need>0), fall back to base
-    if(!legal.length) legal=dedupeSorted(base,nT);
-    rowJoints.push(legal);
+  var picks=[];               // valid truss indices for interior joints
+  for(var i=1;i<=nT-2;i++) picks.push(i);
+  var out=[];
+  // recursive combination builder
+  function rec(start, chosen){
+    if(chosen.length===need){
+      // check spacing within row
+      for(var k=1;k<chosen.length;k++){ if(chosen[k]-chosen[k-1] < minInRow) return; }
+      // check legality (all segments <= cap)
+      var segs=segLengths(trusses,chosen,runIn);
+      if(maxSeg(segs) > capIn+0.5) return;
+      out.push(chosen.slice());
+      return;
+    }
+    for(var p=start;p<picks.length;p++){
+      chosen.push(picks[p]);
+      rec(p+1, chosen);
+      chosen.pop();
+    }
   }
-  return rowJoints;
+  rec(0, []);
+  return out;
 }
 
-// ---- scoring: lower = better ----
-// uniformity: penalize adjacent-row joints closer than 2 bays; heavy penalty for
-// same-truss (0 bays); moderate for 1 bay; reward even spread across the run.
-function scoreUniformity(trusses,runIn,capIn,rowJoints){
-  var pen=0, oc=trusses.length>1?(trusses[1]-trusses[0]):24;
+// tag a row: does it reach near-left (idx<=2) AND near-right (idx>=nT-3)?
+function reachesBoth(row,nT){
+  var l=false,r=false;
+  row.forEach(function(x){ if(x<=2)l=true; if(x>=nT-3)r=true; });
+  return l&&r;
+}
+// spread score of a row: sum of interior gaps variance (lower=more even). Used to
+// prefer evenly-spaced rows.
+function rowEvenness(trusses,row,runIn){
+  var segs=segLengths(trusses,row,runIn);
+  var mean=segs.reduce(function(a,b){return a+b;},0)/segs.length;
+  return segs.reduce(function(a,b){return a+(b-mean)*(b-mean);},0)/segs.length;
+}
+
+// ---- assemble a unit of `unitRows` rows from the candidate pool ----
+// Requirements: consecutive rows (incl wrap seam) >= 2 bays apart (allow 1 rarely),
+// at least one row reachesBoth, maximize distinct-truss coverage across the unit.
+// Greedy with seeded variety per variant.
+function assembleUnit(trusses,runIn,capIn,unitRows,cands,variant){
+  var nT=trusses.length;
+  if(!cands.length) return null;
+
+  var reachers=cands.filter(function(r){return reachesBoth(r,nT);});
+  var others=cands.filter(function(r){return !reachesBoth(r,nT);});
+  // if no dedicated reacher exists, treat the whole pool as candidates for the
+  // "reach" slot (room geometry simply can't reach both walls with these rules)
+  if(!reachers.length) reachers=cands.slice();
+
+  var seed=(variant+1)*2654435761 % 2147483647;
+  function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
+  function shuffle(arr){ var a=arr.slice(); for(var i=a.length-1;i>0;i--){ var j=Math.floor(rnd()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
+
+  // pick the reacher row for this variant (rotate through available reachers)
+  var reacher = reachers[variant % reachers.length];
+
+  function tryBuild(minGap){
+    var chosen=[reacher];
+    // fill remaining rows from shuffled "others" (fallback to all cands), keeping
+    // gap to previous AND ensuring distinct rows; seam checked at the end.
+    var fillPool = shuffle(others.length>=unitRows-1 ? others : cands);
+    for(var r=1;r<unitRows;r++){
+      var prev=chosen[chosen.length-1], pick=null;
+      for(var i=0;i<fillPool.length;i++){
+        var cand=fillPool[i];
+        if(chosen.some(function(c){return key(c)===key(cand);})) continue;
+        if(minGapBetween(prev,cand)>=minGap){ pick=cand; break; }
+      }
+      if(!pick) return null;
+      chosen.push(pick);
+    }
+    // seam: last -> first
+    if(minGapBetween(chosen[chosen.length-1],chosen[0])<minGap) return null;
+    return chosen;
+  }
+
+  // try several shuffles at strict 2-bay, then relax to 1-bay if the room forces it
+  for(var attempt=0;attempt<40;attempt++){
+    var u=tryBuild(2);
+    if(u) return u;
+  }
+  for(var attempt2=0;attempt2<40;attempt2++){
+    var u2=tryBuild(1);
+    if(u2) return u2;
+  }
+  return null;
+}
+
+function tileUnit(unit, rows){
+  var out=[],u=unit.length;
+  for(var r=0;r<rows;r++) out.push(unit[r%u].slice());
+  return out;
+}
+
+function optionStats(trusses,runIn,capIn,rowJoints){
+  var illegal=0,stacked=0,oneBay=0;
   for(var r=0;r<rowJoints.length;r++){
-    var j=rowJoints[r];
-    // within-row: joints should be well separated (they are by construction, but check)
-    for(var a=0;a<j.length;a++){
-      for(var b=a+1;b<j.length;b++){
-        var gap=Math.abs(j[b]-j[a]); // in bays
-        if(gap<2) pen+=(2-gap)*3;
+    if(maxSeg(segLengths(trusses,rowJoints[r],runIn))>capIn+0.5) illegal++;
+    if(r>0){ var g=minGapBetween(rowJoints[r-1],rowJoints[r]); if(g===0)stacked++; else if(g===1)oneBay++; }
+  }
+  var nT=trusses.length,rl=false,rr=false,used={};
+  rowJoints.forEach(function(j){ j.forEach(function(x){ if(x<=2)rl=true; if(x>=nT-3)rr=true; used[x]=1; }); });
+  return {illegal:illegal,stacked:stacked,oneBay:oneBay,reachBoth:(rl&&rr),coverage:Object.keys(used).length};
+}
+
+// ---- top level: 6 options ----
+function generateOptions(trusses,runIn,capIn,rows){
+  if(jointCount(runIn,capIn)===0){
+    var blank=[]; for(var r=0;r<rows;r++)blank.push([]);
+    return [{rowJoints:blank,unit:[[]],unitRows:1,label:"jointless (full boards)",
+      stats:{illegal:0,stacked:0,oneBay:0,reachBoth:true,coverage:0}}];
+  }
+  var need=jointCount(runIn,capIn);
+  var cands=candidateRows(trusses,runIn,capIn,need,2);
+  if(cands.filter(function(r){return reachesBoth(r,trusses.length);}).length===0){
+    var relaxed=candidateRows(trusses,runIn,capIn,need,1);
+    if(relaxed.length>cands.length) cands=relaxed;
+  }
+
+  var specs=[
+    {unitRows:3,variant:0,label:"3-row · A"},
+    {unitRows:3,variant:1,label:"3-row · B"},
+    {unitRows:4,variant:2,label:"4-row · A"},
+    {unitRows:4,variant:3,label:"4-row · B"},
+    {unitRows:5,variant:4,label:"5-row · A"},
+    {unitRows:5,variant:5,label:"5-row · B"}
+  ];
+  var opts=[];
+  specs.forEach(function(sp){
+    var unit=assembleUnit(trusses,runIn,capIn,sp.unitRows,cands,sp.variant);
+    if(!unit){
+      // graceful fallback: pick the widest-spread distinct rows we can, no stacking,
+      // rather than repeating one row (which stacks). Build from shuffled pool.
+      unit=wideSpreadFallback(trusses,runIn,capIn,sp.unitRows,cands,sp.variant);
+    }
+    var rj=tileUnit(unit,rows);
+    opts.push({rowJoints:rj,unit:unit,unitRows:sp.unitRows,label:sp.label,
+      stats:optionStats(trusses,runIn,capIn,rj)});
+  });
+  return opts;
+}
+
+// When we can't satisfy reach-both-walls, at least avoid stacking: pick distinct
+// rows spread across the width, honoring >=2 bay seam where possible.
+function wideSpreadFallback(trusses,runIn,capIn,unitRows,cands,variant){
+  var seed=(variant+7)*40503 % 2147483647;
+  function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
+  function shuffle(arr){ var a=arr.slice(); for(var i=a.length-1;i>0;i--){var j=Math.floor(rnd()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;} return a; }
+  for(var minGap=2;minGap>=1;minGap--){
+    for(var attempt=0;attempt<60;attempt++){
+      var pool=shuffle(cands), chosen=[pool[0]];
+      for(var r=1;r<unitRows;r++){
+        var prev=chosen[chosen.length-1], pick=null;
+        for(var i=0;i<pool.length;i++){
+          var c=pool[i];
+          if(chosen.some(function(x){return key(x)===key(c);})) continue;
+          if(minGapBetween(prev,c)>=minGap){ pick=c; break; }
+        }
+        if(pick) chosen.push(pick); else break;
+      }
+      if(chosen.length===unitRows && minGapBetween(chosen[chosen.length-1],chosen[0])>=minGap){
+        return chosen;
       }
     }
-    if(r>0){
-      var p=rowJoints[r-1];
-      // for each joint, distance in bays to nearest joint in previous row
-      j.forEach(function(x){
-        var nd=1e9; p.forEach(function(y){ nd=Math.min(nd,Math.abs(x-y)); });
-        if(nd===0) pen+=10;        // stacked — very bad
-        else if(nd===1) pen+=3;    // 1 bay — acceptable but costs
-        // 2+ bays: no penalty (preferred)
-      });
-    }
   }
-  // even-spread reward: measure variance of all joint positions across the run;
-  // lower variance of spacing = more uniform. approximate via std of joint x's.
-  var xs=[]; rowJoints.forEach(function(j){ j.forEach(function(idx){ xs.push(trusses[idx]); }); });
-  if(xs.length>2){
-    xs.sort(function(a,b){return a-b;});
-    var gaps=[]; for(var i=1;i<xs.length;i++)gaps.push(xs[i]-xs[i-1]);
-    var mean=gaps.reduce(function(a,b){return a+b;},0)/gaps.length;
-    var varc=gaps.reduce(function(a,b){return a+(b-mean)*(b-mean);},0)/gaps.length;
-    pen += Math.sqrt(varc)/oc * 0.5; // mild
-  }
-  return pen;
-}
-
-// how different two layouts are (for ensuring the 5 options are distinct)
-function layoutDistance(A,B){
-  var d=0,n=Math.min(A.length,B.length);
-  for(var r=0;r<n;r++){
-    var a=A[r]||[],b=B[r]||[];
-    var m=Math.max(a.length,b.length);
-    for(var k=0;k<m;k++){ d+=Math.abs((a[k]==null?-5:a[k])-(b[k]==null?-5:b[k])); }
-  }
-  return d;
-}
-
-// ---- top-level: generate many, score, return 5 distinct good ones ----
-function generateOptions(trusses,runIn,capIn,rows){
-  // jointless room: a single full board spans the run — no joints, no choices.
-  if (jointCount(runIn,capIn)===0){
-    var blank=[]; for(var r=0;r<rows;r++) blank.push([]);
-    return [blank];   // one option only
-  }
-
-  var recipes=[];
-  // steady swings of varying width + phase
-  var swingSets=[[0,2],[2,0],[0,1],[1,0],[0,3],[0,2,1],[1,2,0],[0,2,0,3]];
-  for(var s=0;s<swingSets.length;s++){
-    for(var ph=0;ph<2;ph++){
-      recipes.push({swings:swingSets[s],startPhase:ph,jitter:false});
-    }
-  }
-  // varied (jittered) recipes for the "more organic" options
-  for(var seed=1;seed<=8;seed++){
-    recipes.push({swings:[0,2,1,2],startPhase:0,jitter:true,jitterAmt:0.5,seed:seed*777});
-    recipes.push({swings:[0,2],startPhase:0,jitter:true,jitterAmt:0.35,seed:seed*333});
-  }
-
-  var cands=recipes.map(function(rp){
-    var rj=buildCandidate(trusses,runIn,capIn,rows,rp);
-    return {rj:rj, score:scoreUniformity(trusses,runIn,capIn,rj), recipe:rp};
-  });
-  // legality filter (defensive)
-  cands=cands.filter(function(c){
-    for(var r=0;r<c.rj.length;r++){ if(maxSeg(segLengths(trusses,c.rj[r],runIn))>capIn+0.5) return false; }
-    return true;
-  });
-  cands.sort(function(a,b){return a.score-b.score;});
-
-  // pick 5 that are good AND mutually distinct
-  var picked=[];
-  for(var i=0;i<cands.length && picked.length<5;i++){
-    var c=cands[i];
-    var distinct=picked.every(function(p){ return layoutDistance(p.rj,c.rj) > rows; }); // at least ~1 bay diff/row avg
-    if(distinct) picked.push(c);
-  }
-  // if we couldn't find 5 distinct, top up with best remaining
-  for(var k=0;k<cands.length && picked.length<5;k++){
-    if(picked.indexOf(cands[k])===-1) picked.push(cands[k]);
-  }
-  return picked.map(function(p){ return p.rj; });
+  // last resort: distinct rows if any, else repeat first
+  var distinct=[]; for(var k=0;k<cands.length && distinct.length<unitRows;k++){ if(!distinct.some(function(x){return key(x)===key(cands[k]);})) distinct.push(cands[k]); }
+  while(distinct.length<unitRows) distinct.push(cands[0]);
+  return distinct;
 }
 
 // ============================================================
@@ -562,7 +588,11 @@ function generate(){
 // compute stock assignment + takeoff for the currently active option
 function applyActiveOption(){
   var inp = STATE.inp;
-  var rowJoints = STATE.options[STATE.active];
+  var opt = STATE.options[STATE.active];
+  var rowJoints = opt.rowJoints;
+  STATE.activeLabel = opt.label || "";
+  STATE.activeUnitRows = opt.unitRows || 1;
+  STATE.inp.unitRows = opt.unitRows || 1;
   var assign = assignStock(inp, rowJoints);
   STATE.rowJoints = rowJoints;
   STATE.rowStock = assign.rowStock;
@@ -588,6 +618,11 @@ function drawDiagram(inp, rowJoints, rowStock, showRows){
   for (var r=0;r<rows;r++){
     var y=top+r*rh;
     s += '<rect x="'+left+'" y="'+(y+2)+'" width="'+span+'" height="'+(rh-4)+'" fill="#DCEAFB" stroke="#B5D4F4" stroke-width="0.5"/>';
+    // repeating-unit letter (A,B,C... within the unit), if a unit size is set
+    if (inp.unitRows && inp.unitRows>1){
+      var letter=String.fromCharCode(65+(r % inp.unitRows));
+      s += '<text x="'+(left-3)+'" y="'+(y+rh-4)+'" font-size="7" fill="#185FA5" font-family="sans-serif" text-anchor="end">'+letter+'</text>';
+    }
     (rowJoints[r]||[]).forEach(function(idx){
       if (trusses[idx]==null) return;
       var x=ix(trusses[idx]);
@@ -622,11 +657,11 @@ function renderLayout(){
   var card=el("div","card");
   var nOpts=STATE.options.length;
   var lbl=el("p","lbl");
-  lbl.textContent = nOpts>1 ? ("Layout · option "+(STATE.active+1)+" of "+nOpts) : "Layout · single option (jointless)";
+  lbl.textContent = nOpts>1 ? ("Layout · option "+(STATE.active+1)+" of "+nOpts+" · "+(STATE.activeLabel||"")) : "Layout · single option (jointless)";
   card.appendChild(lbl);
   var dw=el("div","diagwrap"); dw.innerHTML=drawDiagram(inp, STATE.rowJoints, STATE.rowStock, 10); card.appendChild(dw);
   var bar=el("div","optbar");
-  var who=el("span","who"); who.textContent=inp.rows+" rows · "+(STATE.rowJoints[0].length||0)+" joints/row";
+  var who=el("span","who"); who.textContent=inp.rows+" rows · "+(STATE.activeUnitRows>1?(STATE.activeUnitRows+"-row repeat"):"jointless");
   var tag=el("span","tag"); tag.textContent=inp.oc+"″ o.c. · 1st truss "+inp.offset+"″";
   bar.appendChild(who); bar.appendChild(tag); card.appendChild(bar);
 
