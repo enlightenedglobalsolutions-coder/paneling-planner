@@ -296,21 +296,14 @@ function assembleUnit(trusses,runIn,capIn,unitRows,cands,variant){
 
   var reachers=cands.filter(function(r){return reachesBoth(r,nT);});
   var others=cands.filter(function(r){return !reachesBoth(r,nT);});
-  // if no dedicated reacher exists, treat the whole pool as candidates for the
-  // "reach" slot (room geometry simply can't reach both walls with these rules)
   if(!reachers.length) reachers=cands.slice();
 
   var seed=(variant+1)*2654435761 % 2147483647;
   function rnd(){ seed=(seed*1103515245+12345)&0x7fffffff; return seed/0x7fffffff; }
   function shuffle(arr){ var a=arr.slice(); for(var i=a.length-1;i>0;i--){ var j=Math.floor(rnd()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
 
-  // pick the reacher row for this variant (rotate through available reachers)
-  var reacher = reachers[variant % reachers.length];
-
-  function tryBuild(minGap){
+  function tryBuild(minGap, reacher){
     var chosen=[reacher];
-    // fill remaining rows from shuffled "others" (fallback to all cands), keeping
-    // gap to previous AND ensuring distinct rows; seam checked at the end.
     var fillPool = shuffle(others.length>=unitRows-1 ? others : cands);
     for(var r=1;r<unitRows;r++){
       var prev=chosen[chosen.length-1], pick=null;
@@ -322,27 +315,73 @@ function assembleUnit(trusses,runIn,capIn,unitRows,cands,variant){
       if(!pick) return null;
       chosen.push(pick);
     }
-    // seam: last -> first
     if(minGapBetween(chosen[chosen.length-1],chosen[0])<minGap) return null;
     return chosen;
   }
 
-  // try several shuffles at strict 2-bay, then relax to 1-bay if the room forces it
-  for(var attempt=0;attempt<40;attempt++){
-    var u=tryBuild(2);
-    if(u) return u;
+  // Generate MANY candidate units and keep the best-SPREAD one (not the first).
+  var best=null, bestScore=1e18;
+  function consider(u){
+    if(!u) return;
+    var sc=unitSpread(trusses,u,runIn);
+    if(sc<bestScore){ bestScore=sc; best=u; }
   }
-  for(var attempt2=0;attempt2<40;attempt2++){
-    var u2=tryBuild(1);
-    if(u2) return u2;
+  // try many reacher rows × many shuffles at strict 2-bay
+  for(var pass=0;pass<120;pass++){
+    var reacher=reachers[(variant+pass)%reachers.length];
+    consider(tryBuild(2,reacher));
+    if(best && bestScore<=0.001) break;   // perfect spread, stop early
   }
-  return null;
+  if(!best){
+    for(var pass2=0;pass2<120;pass2++){
+      var reacher2=reachers[(variant+pass2)%reachers.length];
+      consider(tryBuild(1,reacher2));
+    }
+  }
+  return best;
 }
 
 function tileUnit(unit, rows){
   var out=[],u=unit.length;
   for(var r=0;r<rows;r++) out.push(unit[r%u].slice());
   return out;
+}
+
+// Spread score for a whole unit: measures whether joints cover the ceiling width
+// evenly across left / middle / right zones. LOWER = better spread. Heavily
+// penalizes clustering (joints bunched in one zone) and lopsidedness.
+function unitSpread(trusses, unit, runIn){
+  var nT=trusses.length;
+  // divide interior trusses into 3 zones by x-position
+  var thirds=[runIn/3, 2*runIn/3];
+  var zone={L:0,M:0,R:0};
+  var total=0;
+  unit.forEach(function(row){
+    row.forEach(function(idx){
+      var x=trusses[idx];
+      if(x<thirds[0]) zone.L++;
+      else if(x<thirds[1]) zone.M++;
+      else zone.R++;
+      total++;
+    });
+  });
+  if(total===0) return 0;
+  // ideal: joints split evenly across the 3 zones
+  var ideal=total/3;
+  var imbalance=Math.abs(zone.L-ideal)+Math.abs(zone.M-ideal)+Math.abs(zone.R-ideal);
+  // penalty if any zone is EMPTY (nothing on the left, say) — that's the clustering
+  var emptyZones=(zone.L===0?1:0)+(zone.M===0?1:0)+(zone.R===0?1:0);
+  // per-row lopsidedness: penalize rows whose joints all sit on one side
+  var rowLop=0;
+  unit.forEach(function(row){
+    if(row.length<2) return;
+    var xs=row.map(function(i){return trusses[i];});
+    var mid=runIn/2;
+    var leftCt=xs.filter(function(x){return x<mid;}).length;
+    var rightCt=xs.length-leftCt;
+    if(leftCt===0 || rightCt===0) rowLop+=1;   // whole row on one side of centre
+  });
+  return imbalance + emptyZones*total*2 + rowLop*total;
 }
 
 function optionStats(trusses,runIn,capIn,rowJoints){
@@ -355,8 +394,7 @@ function optionStats(trusses,runIn,capIn,rowJoints){
   rowJoints.forEach(function(j){ j.forEach(function(x){ if(x<=2)rl=true; if(x>=nT-3)rr=true; used[x]=1; }); });
   return {illegal:illegal,stacked:stacked,oneBay:oneBay,reachBoth:(rl&&rr),coverage:Object.keys(used).length};
 }
-
-// ---- top level: 6 options ----
+// ---- top level: 6 options, all held to the spread standard ----
 function generateOptions(trusses,runIn,capIn,rows){
   if(jointCount(runIn,capIn)===0){
     var blank=[]; for(var r=0;r<rows;r++)blank.push([]);
@@ -370,27 +408,57 @@ function generateOptions(trusses,runIn,capIn,rows){
     if(relaxed.length>cands.length) cands=relaxed;
   }
 
-  var specs=[
-    {unitRows:3,variant:0,label:"3-row · A"},
-    {unitRows:3,variant:1,label:"3-row · B"},
-    {unitRows:4,variant:2,label:"4-row · A"},
-    {unitRows:4,variant:3,label:"4-row · B"},
-    {unitRows:5,variant:4,label:"5-row · A"},
-    {unitRows:5,variant:5,label:"5-row · B"}
-  ];
-  var opts=[];
-  specs.forEach(function(sp){
-    var unit=assembleUnit(trusses,runIn,capIn,sp.unitRows,cands,sp.variant);
-    if(!unit){
-      // graceful fallback: pick the widest-spread distinct rows we can, no stacking,
-      // rather than repeating one row (which stacks). Build from shuffled pool.
-      unit=wideSpreadFallback(trusses,runIn,capIn,sp.unitRows,cands,sp.variant);
+  // Build a candidate unit for each size (3,4,5) × several variants, score each
+  // for spread, then choose the 6 best-spread units — preferring variety in size
+  // but never showing a badly-clustered unit if a better one exists.
+  var built=[];
+  var sizes=[3,4,5];
+  sizes.forEach(function(sz){
+    for(var v=0;v<6;v++){
+      var unit=assembleUnit(trusses,runIn,capIn,sz,cands,sz*7+v);
+      if(!unit) unit=wideSpreadFallback(trusses,runIn,capIn,sz,cands,sz*7+v);
+      if(!unit) continue;
+      var spread=unitSpread(trusses,unit,runIn);
+      built.push({unit:unit,unitRows:sz,spread:spread,ukey:unit.map(key).join("|")});
     }
-    var rj=tileUnit(unit,rows);
-    opts.push({rowJoints:rj,unit:unit,unitRows:sp.unitRows,label:sp.label,
-      stats:optionStats(trusses,runIn,capIn,rj)});
   });
-  return opts;
+
+  // de-dupe identical units
+  var seen={}, uniq=[];
+  built.forEach(function(b){ if(!seen[b.ukey]){ seen[b.ukey]=1; uniq.push(b); } });
+
+  // sort by spread (best first)
+  uniq.sort(function(a,b){ return a.spread-b.spread; });
+
+  // pick 6, preferring a mix of sizes: take best of each size first, then fill
+  // with the next-best regardless of size.
+  var picked=[], usedKeys={};
+  [3,4,5].forEach(function(sz){
+    for(var i=0;i<uniq.length && picked.filter(function(p){return p.unitRows===sz;}).length<1;i++){
+      if(uniq[i].unitRows===sz && !usedKeys[uniq[i].ukey]){ picked.push(uniq[i]); usedKeys[uniq[i].ukey]=1; }
+    }
+  });
+  // second of each size where possible
+  [3,4,5].forEach(function(sz){
+    for(var i=0;i<uniq.length && picked.filter(function(p){return p.unitRows===sz;}).length<2;i++){
+      if(uniq[i].unitRows===sz && !usedKeys[uniq[i].ukey]){ picked.push(uniq[i]); usedKeys[uniq[i].ukey]=1; }
+    }
+  });
+  // fill remaining slots with next-best overall
+  for(var i=0;i<uniq.length && picked.length<6;i++){
+    if(!usedKeys[uniq[i].ukey]){ picked.push(uniq[i]); usedKeys[uniq[i].ukey]=1; }
+  }
+  // sort final picks by size then spread for a tidy menu
+  picked.sort(function(a,b){ return a.unitRows-b.unitRows || a.spread-b.spread; });
+
+  var labelCount={};
+  return picked.slice(0,6).map(function(p){
+    labelCount[p.unitRows]=(labelCount[p.unitRows]||0)+1;
+    var suffix=String.fromCharCode(64+labelCount[p.unitRows]); // A,B
+    var rj=tileUnit(p.unit,rows);
+    return {rowJoints:rj,unit:p.unit,unitRows:p.unitRows,label:p.unitRows+"-row · "+suffix,
+      stats:optionStats(trusses,runIn,capIn,rj)};
+  });
 }
 
 // When we can't satisfy reach-both-walls, at least avoid stacking: pick distinct
