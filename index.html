@@ -919,12 +919,35 @@ function buildPrintArea(){
 function $(id){ return document.getElementById(id); }
 function num(id){ var v=parseFloat($(id).value); return isNaN(v)?0:v; }
 function ftToIn(ft){ return ft*12; }
+// Format inches as feet-dash-inches with fractions to nearest 1/16", e.g. 5'-6 1/2"
 function fmtFt(inches){
   var neg=inches<0; inches=Math.abs(inches);
-  var f=Math.floor(inches/12); var i=Math.round((inches-f*12)*100)/100;
-  if (i>=12){ f+=1; i-=12; }
-  var s=f+"\u2032"; if (i>0.001) s+=" "+(Math.round(i*100)/100)+"\u2033";
-  return (neg?"-":"")+s;
+  var f=Math.floor(inches/12);
+  var remIn=inches-f*12;
+  // whole inches + fraction of an inch to nearest 1/16
+  var whole=Math.floor(remIn);
+  var frac16=Math.round((remIn-whole)*16);
+  if(frac16===16){ whole+=1; frac16=0; }
+  if(whole===12){ f+=1; whole=0; }
+  // reduce the sixteenths fraction
+  var fracStr="";
+  if(frac16>0){
+    var num=frac16, den=16;
+    while(num%2===0 && den%2===0){ num/=2; den/=2; }
+    fracStr=num+"/"+den;
+  }
+  // build inches part
+  var inchPart="";
+  if(whole>0 && fracStr){ inchPart=whole+" "+fracStr+"\u2033"; }
+  else if(whole>0){ inchPart=whole+"\u2033"; }
+  else if(fracStr){ inchPart=fracStr+"\u2033"; }
+  // assemble: feet'-inches"  (dash only when both feet and inches present)
+  var out;
+  if(f>0 && inchPart){ out=f+"\u2032-"+inchPart; }
+  else if(f>0){ out=f+"\u2032"; }
+  else if(inchPart){ out=inchPart; }
+  else { out="0\u2032"; }
+  return (neg?"-":"")+out;
 }
 function rowName(r){
   var L="ABCDEFGHIJKLMNOPQRSTUVWXYZ";
