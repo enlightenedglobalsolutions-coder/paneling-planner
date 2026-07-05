@@ -346,41 +346,63 @@ function tileUnit(unit, rows){
   return out;
 }
 
-// Spread score for a whole unit: measures whether joints cover the ceiling width
-// evenly across left / middle / right zones. LOWER = better spread. Heavily
-// penalizes clustering (joints bunched in one zone) and lopsidedness.
+// Naturalness score for a whole unit. LOWER = more natural / hand-placed looking.
+// Real ceilings are RANDOM within the rules, not mathematically even. So we keep
+// a floor against clustering (joints must still reach across the ceiling — no
+// empty zones), but then PENALIZE the tells of a generated pattern: joints
+// favoring the same trusses, predictable diagonal drift, and identical rows.
 function unitSpread(trusses, unit, runIn){
   var nT=trusses.length;
-  // divide interior trusses into 3 zones by x-position
   var thirds=[runIn/3, 2*runIn/3];
-  var zone={L:0,M:0,R:0};
-  var total=0;
+  var zone={L:0,M:0,R:0}, total=0;
+  var trussUse={};                    // how often each truss is used across the unit
   unit.forEach(function(row){
     row.forEach(function(idx){
       var x=trusses[idx];
-      if(x<thirds[0]) zone.L++;
-      else if(x<thirds[1]) zone.M++;
-      else zone.R++;
+      if(x<thirds[0]) zone.L++; else if(x<thirds[1]) zone.M++; else zone.R++;
+      trussUse[idx]=(trussUse[idx]||0)+1;
       total++;
     });
   });
   if(total===0) return 0;
-  // ideal: joints split evenly across the 3 zones
-  var ideal=total/3;
-  var imbalance=Math.abs(zone.L-ideal)+Math.abs(zone.M-ideal)+Math.abs(zone.R-ideal);
-  // penalty if any zone is EMPTY (nothing on the left, say) — that's the clustering
+
+  // HARD floor: any empty zone = clustering, heavily penalized (keeps reach)
   var emptyZones=(zone.L===0?1:0)+(zone.M===0?1:0)+(zone.R===0?1:0);
-  // per-row lopsidedness: penalize rows whose joints all sit on one side
+
+  // lopsided rows (all joints one side of centre) — still bad
   var rowLop=0;
   unit.forEach(function(row){
     if(row.length<2) return;
-    var xs=row.map(function(i){return trusses[i];});
-    var mid=runIn/2;
-    var leftCt=xs.filter(function(x){return x<mid;}).length;
-    var rightCt=xs.length-leftCt;
-    if(leftCt===0 || rightCt===0) rowLop+=1;   // whole row on one side of centre
+    var mid=runIn/2, xs=row.map(function(i){return trusses[i];});
+    var l=xs.filter(function(x){return x<mid;}).length;
+    if(l===0 || l===xs.length) rowLop+=1;
   });
-  return imbalance + emptyZones*total*2 + rowLop*total;
+
+  // NATURALNESS penalties (the new part):
+  // 1. truss over-use: penalize the same truss being used many times (favoring
+  //    a few columns reads as patterned). Reward using MANY different trusses.
+  var reuse=0;
+  Object.keys(trussUse).forEach(function(k){ if(trussUse[k]>1) reuse+=(trussUse[k]-1); });
+
+  // 2. diagonal drift: penalize when each row's joints step in the SAME direction
+  //    as the previous row (a marching diagonal). Natural = direction varies.
+  var drift=0, lastDir=0;
+  for(var r=1;r<unit.length;r++){
+    var a=unit[r-1], b=unit[r];
+    if(!a.length||!b.length) continue;
+    var dir=Math.sign((b[0]||0)-(a[0]||0));
+    if(dir!==0 && dir===lastDir) drift+=1;   // same direction two rows running
+    if(dir!==0) lastDir=dir;
+  }
+
+  // 3. identical/near-identical rows in the unit read as repetitive
+  var dup=0;
+  for(var i=0;i<unit.length;i++) for(var j=i+1;j<unit.length;j++){
+    if(unit[i].join(",")===unit[j].join(",")) dup+=1;
+  }
+
+  // clustering/lopsidedness are hard failures; reuse/drift/dup shape naturalness
+  return emptyZones*100 + rowLop*50 + reuse*4 + drift*3 + dup*20;
 }
 
 function optionStats(trusses,runIn,capIn,rowJoints){
@@ -401,21 +423,24 @@ function generateOptions(trusses,runIn,capIn,rows){
       stats:{illegal:0,stacked:0,oneBay:0,reachBoth:true,coverage:0}}];
   }
   var need=jointCount(runIn,capIn);
+  // Mixed-count pool: rows with `need` joints AND rows with need+1 (a shorter
+  // board here and there) — real ceilings vary joint count, they aren't uniform.
   var cands=candidateRows(trusses,runIn,capIn,need,2);
+  var candsPlus=(need+1 <= trusses.length-2) ? candidateRows(trusses,runIn,capIn,need+1,2) : [];
+  cands=cands.concat(candsPlus);
   if(cands.filter(function(r){return reachesBoth(r,trusses.length);}).length===0){
     var relaxed=candidateRows(trusses,runIn,capIn,need,1);
     if(relaxed.length>cands.length) cands=relaxed;
   }
 
-  // Build a candidate unit for each size (3,4,5) × several variants, score each
-  // for spread, then choose the 6 best-spread units — preferring variety in size
-  // but never showing a badly-clustered unit if a better one exists.
+  // Build MANY candidate units per size × many variants, score each for
+  // NATURALNESS (random-within-rules, not even), keep the most natural-looking.
   var built=[];
   var sizes=[3,4,5];
   sizes.forEach(function(sz){
-    for(var v=0;v<6;v++){
-      var unit=assembleUnit(trusses,runIn,capIn,sz,cands,sz*7+v);
-      if(!unit) unit=wideSpreadFallback(trusses,runIn,capIn,sz,cands,sz*7+v);
+    for(var v=0;v<24;v++){
+      var unit=assembleUnit(trusses,runIn,capIn,sz,cands,sz*31+v);
+      if(!unit) unit=wideSpreadFallback(trusses,runIn,capIn,sz,cands,sz*31+v);
       if(!unit) continue;
       var spread=unitSpread(trusses,unit,runIn);
       built.push({unit:unit,unitRows:sz,spread:spread,ukey:unit.map(key).join("|")});
