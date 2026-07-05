@@ -684,6 +684,7 @@ function applyActiveOption(){
   var rowJoints = opt.rowJoints;
   STATE.activeLabel = opt.label || "";
   STATE.activeUnitRows = opt.unitRows || 1;
+  STATE.activeUnit = opt.unit || [rowJoints[0]||[]];
   STATE.inp.unitRows = opt.unitRows || 1;
   var assign = assignStock(inp, rowJoints);
   STATE.rowJoints = rowJoints;
@@ -791,32 +792,104 @@ function renderLayout(){
   }
 }
 
+// ---------- offcut reuse plan ----------
+// Everything is prefinished (one batch), so offcuts reuse freely within the
+// stock length. For ONE unit repeat, cut long pieces first from fresh boards,
+// track each leftover, and assign leftovers to later pieces that fit. Returns
+// a human list: "Row X's N′ piece → cut from the offcut left by Row Y".
+function planOffcuts(inp, unit, stockLenIn){
+  // flatten all pieces in the unit with their row letter, longest first
+  var pieces=[];
+  unit.forEach(function(j,r){
+    segLengths(inp.trusses,j,inp.runIn).forEach(function(len,idx){
+      pieces.push({len:Math.round(len*100)/100, row:rowName(r), idx:idx});
+    });
+  });
+  // sort longest first so big pieces claim fresh boards
+  var order=pieces.slice().sort(function(a,b){return b.len-a.len;});
+  var offcuts=[];   // {len, fromRow}
+  var plan=[];      // reuse events
+  var boardsOpened=0;
+  order.forEach(function(p){
+    // best-fit existing offcut
+    var bi=-1,bd=1e9;
+    for(var o=0;o<offcuts.length;o++){ if(offcuts[o].len>=p.len-0.01 && (offcuts[o].len-p.len)<bd){bd=offcuts[o].len-p.len;bi=o;} }
+    if(bi>=0){
+      var used=offcuts[bi];
+      plan.push({piece:p, from:used.fromRow, fromLen:used.len});
+      var rem=Math.round((used.len-p.len)*100)/100;
+      offcuts.splice(bi,1);
+      if(rem>=24) offcuts.push({len:rem, fromRow:used.fromRow});   // keep >=2ft
+    } else {
+      // fresh board
+      boardsOpened++;
+      var rem2=Math.round((stockLenIn-p.len)*100)/100;
+      if(rem2>=24) offcuts.push({len:rem2, fromRow:p.row});
+    }
+  });
+  return {plan:plan, leftover:offcuts, boardsPerUnit:boardsOpened};
+}
+
 // ---------- render cut list ----------
 function renderCuts(){
   var body=$("cuts-body"); clear(body);
   if (!STATE.rowJoints || STATE.shortage){ body.appendChild(emptyMsg("No cut list yet.", STATE.shortage?"Resolve the stock shortage in Setup first.":"Generate a layout first.")); return; }
   var inp=STATE.inp;
+  var unit=STATE.activeUnit||[STATE.rowJoints[0]];
+  var unitRows=unit.length;
 
   // back to layout
   var back=el("button","btn ghost"); back.textContent="◂ back to layout"; back.style.marginBottom="12px";
   back.addEventListener("click", function(){ switchScreen("s-layout"); });
   body.appendChild(back);
 
+  // --- cut list: ONLY the unique unit rows A..D ---
   var card=el("div","card");
   var lbl=el("p","lbl"); lbl.textContent="Cut list · "+(STATE.activeLabel||""); card.appendChild(lbl);
   var list=el("div","cutlist");
-  STATE.rowJoints.forEach(function(j,r){
+  var stockLenIn = STATE.rowStock && STATE.rowStock[0]!=null ? STATE.rowStock[0] : inp.stock.filter(function(s){return s.qty>0;}).sort(function(a,b){return b.lenIn-a.lenIn;})[0].lenIn;
+  unit.forEach(function(j,r){
     var segs=segLengths(inp.trusses,j,inp.runIn);
     var row=el("div","r");
     var rn=el("span","rn"); rn.textContent="Row "+rowName(r); row.appendChild(rn);
     var seg=el("span","seg"); seg.textContent=segs.map(function(s){return fmtFt(s);}).join("  +  ");
     row.appendChild(seg);
-    if (STATE.rowStock[r]!=null){ var st=el("span","stocktag"); st.textContent=Math.round(STATE.rowStock[r]/12*10)/10+"′ stock"; seg.appendChild(document.createTextNode(" ")); seg.appendChild(st); }
+    var st=el("span","stocktag"); st.textContent=Math.round(stockLenIn/12*10)/10+"′ stock"; seg.appendChild(document.createTextNode(" ")); seg.appendChild(st);
     if (segs.some(function(s){return s<24;})){ var f=el("span","flag"); f.textContent="short end"; seg.appendChild(document.createTextNode(" ")); seg.appendChild(f); }
     list.appendChild(row);
   });
-  card.appendChild(list); body.appendChild(card);
-  var note=el("p","foot"); note.textContent="Segments run wall→joint→…→wall. Each row's pieces come from one stock length (offcuts not shared across lengths)."; body.appendChild(note);
+  card.appendChild(list);
+  var repeatNote=el("p","foot"); repeatNote.style.textAlign="left"; repeatNote.style.marginTop="8px";
+  repeatNote.textContent="These "+unitRows+" rows (A–"+rowName(unitRows-1)+") repeat down the whole ceiling — "+inp.rows+" rows total.";
+  card.appendChild(repeatNote);
+  body.appendChild(card);
+
+  // --- offcut reuse plan ---
+  var oc=planOffcuts(inp, unit, stockLenIn);
+  var pcard=el("div","card");
+  var plbl=el("p","lbl"); plbl.textContent="Offcut plan (per A–"+rowName(unitRows-1)+" set)"; pcard.appendChild(plbl);
+  if(oc.plan.length===0){
+    var none=el("p","foot"); none.style.textAlign="left"; none.textContent="No reusable offcuts in this set — each piece comes from a fresh board."; pcard.appendChild(none);
+  } else {
+    var plist=el("div","cutlist");
+    oc.plan.forEach(function(ev){
+      var row=el("div","r");
+      var rn=el("span","rn"); rn.textContent="Row "+ev.piece.row; row.appendChild(rn);
+      var seg=el("span","seg");
+      seg.textContent="cut its "+fmtFt(ev.piece.len)+" piece from the "+fmtFt(ev.fromLen)+" offcut left by Row "+ev.from;
+      row.appendChild(seg);
+      plist.appendChild(row);
+    });
+    pcard.appendChild(plist);
+  }
+  // leftover summary
+  var lo=el("p","foot"); lo.style.textAlign="left"; lo.style.marginTop="8px";
+  var leftStr = oc.leftover.length ? oc.leftover.map(function(x){return fmtFt(x.len);}).join(", ") : "none";
+  lo.textContent="Each A–"+rowName(unitRows-1)+" set uses ~"+oc.boardsPerUnit+" fresh boards. Usable leftovers per set: "+leftStr+" (prefinished — reuse anywhere).";
+  pcard.appendChild(lo);
+  body.appendChild(pcard);
+
+  var note=el("p","foot"); note.textContent="Segments run wall→joint→…→wall. Everything's one prefinished batch, so any offcut fits any row."; body.appendChild(note);
 }
 
 // ---------- print ----------
