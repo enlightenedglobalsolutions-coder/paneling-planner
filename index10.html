@@ -148,66 +148,10 @@
   .fl-boxes{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
   .fl-box{font-size:11px;font-weight:600;padding:3px 8px;border-radius:5px;
     background:var(--tint);color:var(--ink);border:.5px solid var(--line)}
-
-  /* view switcher */
-  .fl-views{display:flex;gap:5px;overflow-x:auto;-webkit-overflow-scrolling:touch;
-    padding:0 0 9px;margin:0 -1px}
-  .fl-chip{flex:0 0 auto;font-family:inherit;font-size:11.5px;font-weight:600;
-    padding:6px 11px;border-radius:15px;border:.5px solid var(--line);
-    background:var(--paper);color:var(--muted);cursor:pointer;white-space:nowrap}
-  .fl-chip.on{background:var(--royal);border-color:var(--royal);color:#fff}
-  .fl-legend{display:flex;flex-wrap:wrap;gap:9px;margin-top:8px;font-size:11px;color:var(--muted)}
-  .fl-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;
-    margin-right:4px;vertical-align:middle;font-style:normal}
-  .fl-expand{width:100%;margin-top:9px;font-family:inherit;font-size:13px;font-weight:600;
-    padding:11px;border-radius:8px;border:.5px solid var(--royal);
-    background:var(--tint);color:var(--ink);cursor:pointer}
-
-  /* install progress */
-  .fl-prog{margin-top:11px}
-  .fl-prog-top{display:flex;justify-content:space-between;font-size:11px;
-    color:var(--muted);margin-bottom:4px}
-  .fl-prog-bar{height:7px;border-radius:4px;background:var(--line);overflow:hidden}
-  .fl-prog-fill{height:100%;background:var(--okline);width:0}
-
-  /* install rows */
-  .fl-row.now{background:var(--warnbg);border-left:3px solid var(--warnline);
-    margin-left:-10px;padding-left:9px;border-radius:5px}
-  .fl-row.done{opacity:.45}
-  .fl-row.done .fl-cuts{text-decoration:line-through}
-  .fl-rn.tick{color:var(--ok)}
-  .fl-done-btn{width:100%;margin-top:9px;font-family:inherit;font-size:14px;font-weight:700;
-    padding:13px;border-radius:8px;border:none;background:var(--ok);color:#fff;cursor:pointer}
-  .fl-undo-btn{width:100%;margin-top:6px;font-family:inherit;font-size:12px;font-weight:600;
-    padding:9px;border-radius:8px;border:.5px solid var(--line);
-    background:var(--paper);color:var(--muted);cursor:pointer}
-  .fl-clear-btn{width:100%;margin-top:6px;font-family:inherit;font-size:12px;font-weight:600;
-    padding:9px;border-radius:8px;border:.5px solid var(--warnline);
-    background:var(--warnbg);color:var(--warn);cursor:pointer}
-
-  /* fullscreen overlay */
-  .fl-ov{position:fixed;top:0;left:0;right:0;bottom:0;z-index:80;background:var(--bg);
-    display:none;flex-direction:column}
-  .fl-ov.on{display:flex}
-  .fl-ov-bar{flex:0 0 auto;display:flex;gap:5px;align-items:center;padding:8px;
-    padding-top:calc(8px + env(safe-area-inset-top));background:var(--paper);
-    border-bottom:.5px solid var(--line);overflow-x:auto}
-  .fl-ov-bar button{flex:0 0 auto;font-family:inherit;font-size:12px;font-weight:600;
-    padding:8px 11px;border-radius:7px;border:.5px solid var(--line);
-    background:var(--paper);color:var(--ink);cursor:pointer;min-height:40px;white-space:nowrap}
-  .fl-ov-bar button.close{background:var(--royal);border-color:var(--royal);color:#fff}
-  .fl-ov-bar button.on{background:var(--royal);border-color:var(--royal);color:#fff}
-  .fl-ov-stage{flex:1;overflow:hidden;position:relative;touch-action:none;background:#EAE8E0}
-  .fl-ov-stage svg{position:absolute;top:0;left:0;transform-origin:0 0}
-  .fl-ov-foot{flex:0 0 auto;padding:9px 10px;
-    padding-bottom:calc(9px + env(safe-area-inset-bottom));
-    background:var(--paper);border-top:.5px solid var(--line);
-    font-size:11.5px;color:var(--muted);text-align:center}
   /* ===== FLOORING MODULE CSS END ===== */
 
   @media print{
-    header.top,nav.bottom,.modebar,.btn,.optbar,.diagwrap,
-    .fl-ov,.fl-views,.fl-expand,.fl-done-btn,.fl-undo-btn,.fl-clear-btn{display:none !important}
+    header.top,nav.bottom,.modebar,.btn,.optbar,.diagwrap{display:none !important}
     .screen{display:block !important;padding:0}
     body{background:#fff}
     .card,.takeoff{border:none;padding:4px 0}
@@ -346,14 +290,6 @@
     <button data-screen="s-print"><span class="ic">⎙</span>Print</button>
   </nav>
 </div>
-
-<!-- ===== FLOORING MODULE OVERLAY START ===== -->
-<div class="fl-ov" id="fl-ov">
-  <div class="fl-ov-bar" id="fl-ov-bar"></div>
-  <div class="fl-ov-stage" id="fl-ov-stage"></div>
-  <div class="fl-ov-foot" id="fl-ov-foot"></div>
-</div>
-<!-- ===== FLOORING MODULE OVERLAY END ===== -->
 
 <script>
 "use strict";
@@ -1131,7 +1067,6 @@ function switchScreen(id){
 var MODE = "panel";
 function setMode(m){
   MODE = m;
-  if (typeof FL !== "undefined" && FL.closeOverlay) FL.closeOverlay();
   $("mode-panel").classList.toggle("on", m==="panel");
   $("mode-floor").classList.toggle("on", m==="floor");
   $("setup-panel").hidden = (m!=="panel");
@@ -1434,8 +1369,7 @@ var FL = (function(){
   }
 
   // ---------- state ----------
-  var S = { cfg:null, cands:[], active:0, box:null,
-            view:"blueprint", done:{}, fp:null, jumpTo:null };
+  var S = { cfg:null, cands:[], active:0, box:null };
 
   function readInputs(){
     var gap = num("f-gap");
@@ -1478,398 +1412,55 @@ var FL = (function(){
     S.cands = generateCandidates(cfg);
     S.active = 0;
     S.box = boxPlan(S.cands[0].rows, cfg);
-    // If this is the same layout you were already installing, pick the ticks back up.
-    S.fp = fingerprint(cfg, S.cands[0]);
-    S.done = loadProgress(S.fp);
-    S.jumpTo = null;
-    refreshWake();
     switchScreen("s-layout");
   }
 
   function reshuffle(){
     if (!S.cands.length) return;
-    // A different layout means the row numbers mean something different. Say so
-    // before the ticks are thrown away, rather than after.
-    if (hasProgress()){
-      if (!window.confirm("You've laid " + doneCount() + " row(s). A different layout renumbers the "
-        + "cuts, so that progress will be cleared. Reshuffle anyway?")) return;
-    }
     S.active = (S.active + 1) % Math.min(S.cands.length, 6);
     S.box = boxPlan(S.cands[S.active].rows, S.cfg);
-    S.fp = fingerprint(S.cfg, S.cands[S.active]);
-    S.done = {};
-    saveProgress();
-    refreshWake();
     renderLayout();
   }
 
-  // ---------- progress ----------
-  // Progress belongs to ONE specific layout. Reshuffle or change the room and the
-  // row numbers underneath it mean something different, so the ticks are pinned to
-  // a fingerprint of the exact layout they were made against.
-  var PKEY = "egs-floor-progress";
-  function fingerprint(cfg, cand){
-    return [cfg.runIn, cfg.acrossIn, cfg.plankLen, cfg.plankWid, cfg.nRows,
-            cand.rows.map(function(r){ return Math.round(r.start*2); }).join(".")].join("|");
-  }
-  function loadProgress(fp){
-    try{
-      var raw = window.localStorage.getItem(PKEY);
-      if (!raw) return {};
-      var o = JSON.parse(raw);
-      if (!o || o.fp !== fp) return {};
-      var d={}; (o.done||[]).forEach(function(n){ d[n]=true; });
-      return d;
-    } catch(e){ return {}; }
-  }
-  function saveProgress(){
-    try{
-      var done=[]; for (var k in S.done){ if (S.done[k]) done.push(Number(k)); }
-      window.localStorage.setItem(PKEY, JSON.stringify({ fp:S.fp, done:done }));
-    } catch(e){}
-  }
-  function doneCount(){ var n=0; for (var k in S.done){ if (S.done[k]) n++; } return n; }
-  function currentRow(){
-    for (var i=1; i<=S.cfg.nRows; i++){ if (!S.done[i]) return i; }
-    return null;
-  }
-  function hasProgress(){ return doneCount() > 0; }
-
-  function toggleRow(n){
-    if (S.done[n]) delete S.done[n]; else S.done[n] = true;
-    saveProgress();
-    refreshWake();
-    renderLayout(); renderCuts();
-    if (OV.open) drawOverlay();
-  }
-  function clearProgress(){
-    if (!hasProgress()) return;
-    if (!window.confirm("Clear all " + doneCount() + " completed rows? This can't be undone.")) return;
-    S.done = {};
-    saveProgress();
-    refreshWake();
-    renderLayout(); renderCuts();
-    if (OV.open) drawOverlay();
-  }
-
-  // ---------- wake lock ----------
-  // Nobody wants to unlock a phone with adhesive on their hands every 30 seconds.
-  var wake = null;
-  function refreshWake(){
-    var want = hasProgress() && currentRow() !== null;
-    if (want) requestWake(); else releaseWake();
-  }
-  function requestWake(){
-    if (wake || !navigator.wakeLock) return;
-    navigator.wakeLock.request("screen").then(function(w){
-      wake = w;
-      w.addEventListener("release", function(){ wake = null; });
-    }).catch(function(){});
-  }
-  function releaseWake(){ if (wake){ try{ wake.release(); }catch(e){} wake = null; } }
-  document.addEventListener("visibilitychange", function(){
-    if (document.visibilityState === "visible" && MODE === "floor") refreshWake();
-  });
-
   // ---------- diagram ----------
-  var SVGNS = "http://www.w3.org/2000/svg";
-  function mk(name, attrs){
-    var e = document.createElementNS(SVGNS, name);
-    for (var k in attrs) e.setAttribute(k, attrs[k]);
-    return e;
-  }
-  function rowY(cfg, i){ var y=0; for (var k=0;k<i;k++) y+=cfg.widths[k]; return y; }
-  // End joints of a row, excluding the far wall.
-  function rowJoints(r){
-    var out=[], x=0;
-    for (var j=0; j<r.pieces.length-1; j++){ x += r.pieces[j]; out.push(x); }
-    return out;
-  }
+  var SHADES = ["#C9DCF0","#B4CEE9","#DCE9F6","#A7C5E4","#C0D6EE"];
+  function svgDiagram(cand, cfg){
+    var SVG="http://www.w3.org/2000/svg";
+    var runIn=cfg.runIn, rows=cand.rows;
+    var svg=document.createElementNS(SVG,"svg");
+    svg.setAttribute("viewBox","0 0 "+runIn+" "+cfg.acrossIn);
+    svg.setAttribute("width", Math.max(640, Math.round(runIn*1.35)));
 
-  var VIEWS = [
-    { id:"blueprint", name:"Blueprint" },
-    { id:"seams",     name:"Seam map" },
-    { id:"heat",      name:"Clearance" },
-    { id:"wood",      name:"Wood" },
-    { id:"install",   name:"Install" }
-  ];
-  var LEGENDS = {
-    heat: [["#3B6D11","generous"],["#9DBF3C","comfortable"],["#EF9F27","near minimum"],["#D14B2A","under minimum"]],
-    install: [["#EAF3DE","done"],["#FFF4DE","current row"],["#F7F5EF","to do"]]
-  };
-  var BLUE = ["#C9DCF0","#B4CEE9","#DCE9F6","#A7C5E4","#C0D6EE"];
-  var WOOD = ["#C89A5F","#BE8E52","#D2A76C","#B5854A","#CBA067","#C0925A"];
+    var bg=document.createElementNS(SVG,"rect");
+    bg.setAttribute("x",0); bg.setAttribute("y",0);
+    bg.setAttribute("width",runIn); bg.setAttribute("height",cfg.acrossIn);
+    bg.setAttribute("fill","#F1EFE8");
+    svg.appendChild(bg);
 
-  // One renderer, five skins. opts: {view, rotated, gutter, tappable}
-  function buildSvg(cand, cfg, opts){
-    opts = opts || {};
-    var view = opts.view || "blueprint";
-    var GUT = opts.gutter ? 17 : 0;
-    var W = cfg.runIn + GUT, H = cfg.acrossIn;
-
-    var svg = mk("svg", {});
-    if (opts.rotated){
-      svg.setAttribute("viewBox", "0 0 " + H + " " + W);
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    } else {
-      svg.setAttribute("viewBox", (-GUT) + " 0 " + W + " " + H);
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    }
-    var g = mk("g", {});
-    if (opts.rotated) g.setAttribute("transform", "rotate(90) translate(" + GUT + ",-" + H + ")");
-    svg.appendChild(g);
-
-    var bg = { blueprint:"#F1EFE8", seams:"#FFFFFF", heat:"#FAF9F5", wood:"#8A6A3E", install:"#FFFFFF" }[view];
-    g.appendChild(mk("rect", { x:-GUT, y:0, width:W, height:H, fill:bg }));
-
-    var cur = currentRow();
-
-    for (var i=0; i<cand.rows.length; i++){
-      var r = cand.rows[i], y = rowY(cfg,i), h = cfg.widths[i], x = 0;
-      var isDone = !!S.done[r.n], isNow = (r.n === cur);
-
-      // neighbours, for the heatmap
-      var nb = [];
-      if (i>0) nb = nb.concat(rowJoints(cand.rows[i-1]));
-      if (i>1) nb = nb.concat(rowJoints(cand.rows[i-2]));
-
-      for (var p=0; p<r.pieces.length; p++){
-        var len = r.pieces[p], fill, stroke = "#042C53", sw = 0.6;
-
-        if (view === "blueprint"){
-          fill = BLUE[(i*3+p) % BLUE.length];
-        } else if (view === "seams"){
-          fill = "#FFFFFF"; stroke = "none"; sw = 0;
-        } else if (view === "heat"){
-          fill = "#FFFFFF"; stroke = "#DDDBD2"; sw = 0.4;
-        } else if (view === "wood"){
-          fill = WOOD[(i*5+p*3) % WOOD.length]; stroke = "#6E5230"; sw = 0.5;
-        } else { // install
-          fill = isDone ? "#EAF3DE" : isNow ? "#FFF4DE" : "#F7F5EF";
-          stroke = isNow ? "#EF9F27" : "#B9B7AE"; sw = isNow ? 1.5 : 0.5;
-        }
-
-        var rect = mk("rect", { x:x.toFixed(2), y:y.toFixed(2), width:len.toFixed(2),
-                                height:h.toFixed(2), fill:fill });
-        if (sw > 0){ rect.setAttribute("stroke", stroke); rect.setAttribute("stroke-width", sw); }
-        // Completed work fades back in every view, not just the install one.
-        if (isDone && view !== "install") rect.setAttribute("fill-opacity", "0.3");
-        g.appendChild(rect);
-
-        if (view === "wood"){
-          for (var gl=1; gl<3; gl++){
-            g.appendChild(mk("line", { x1:(x+2).toFixed(2), y1:(y+h*gl/3).toFixed(2),
-              x2:(x+len-2).toFixed(2), y2:(y+h*gl/3 + (p%2?0.5:-0.5)).toFixed(2),
-              stroke:"#00000018", "stroke-width":0.5 }));
-          }
-        }
-        if (view === "install" && len > 26){
-          var t = mk("text", { x:(x+len/2).toFixed(2), y:(y+h/2+2.1).toFixed(2),
-            "font-size":"5.2", "text-anchor":"middle", "font-family":"monospace",
-            fill: isDone ? "#3B6D11" : "#5F5E5A" });
-          if (opts.rotated) t.setAttribute("transform","rotate(-90 "+(x+len/2).toFixed(2)+" "+(y+h/2).toFixed(2)+")");
-          t.textContent = Math.abs(len-cfg.plankLen) < 0.01 ? "full" : inch(len);
-          g.appendChild(t);
-        }
+    var y=0;
+    for (var i=0;i<rows.length;i++){
+      var r=rows[i], h=cfg.widths[i], x=0;
+      for (var p=0;p<r.pieces.length;p++){
+        var len=r.pieces[p];
+        var rect=document.createElementNS(SVG,"rect");
+        rect.setAttribute("x",x.toFixed(2)); rect.setAttribute("y",y.toFixed(2));
+        rect.setAttribute("width",len.toFixed(2)); rect.setAttribute("height",h.toFixed(2));
+        rect.setAttribute("fill", SHADES[(i*3+p) % SHADES.length]);
+        rect.setAttribute("stroke","#042C53");
+        rect.setAttribute("stroke-width","0.6");
+        svg.appendChild(rect);
         x += len;
       }
-
-      // seams / heat draw the joints on top
-      if (view === "seams"){
-        g.appendChild(mk("line", { x1:0, y1:(y+h).toFixed(2), x2:cfg.runIn, y2:(y+h).toFixed(2),
-          stroke:"#E4E2DA", "stroke-width":0.5 }));
-        rowJoints(r).forEach(function(jx){
-          g.appendChild(mk("line", { x1:jx.toFixed(2), y1:y.toFixed(2), x2:jx.toFixed(2),
-            y2:(y+h).toFixed(2), stroke:"#042C53", "stroke-width":2.4,
-            "stroke-linecap":"round", "stroke-opacity": isDone ? 0.3 : 1 }));
-        });
+      if (r.relaxed){
+        var f=document.createElementNS(SVG,"rect");
+        f.setAttribute("x",0); f.setAttribute("y",y.toFixed(2));
+        f.setAttribute("width","3"); f.setAttribute("height",h.toFixed(2));
+        f.setAttribute("fill","#EF9F27");
+        svg.appendChild(f);
       }
-      if (view === "heat"){
-        rowJoints(r).forEach(function(jx){
-          var d = Infinity;
-          for (var q=0;q<nb.length;q++) d = Math.min(d, Math.abs(jx-nb[q]));
-          if (!isFinite(d)) d = cfg.plankLen;
-          var m = cfg.minOff;
-          var col = d < m ? "#D14B2A" : d < m*1.25 ? "#EF9F27" : d < m*1.6 ? "#9DBF3C" : "#3B6D11";
-          g.appendChild(mk("line", { x1:jx.toFixed(2), y1:y.toFixed(2), x2:jx.toFixed(2),
-            y2:(y+h).toFixed(2), stroke:col, "stroke-width":3, "stroke-linecap":"round",
-            "stroke-opacity": isDone ? 0.3 : 1 }));
-        });
-      }
-
-      // row-number gutter — the tap target that jumps to the cut list
-      if (opts.gutter){
-        var num = mk("text", { x:(-GUT/2).toFixed(2), y:(y+h/2+2.4).toFixed(2),
-          "font-size":"6.4", "text-anchor":"middle", "font-family":"monospace",
-          "font-weight":"bold", fill: isNow ? "#854F0B" : isDone ? "#3B6D11" : "#888780" });
-        if (opts.rotated) num.setAttribute("transform","rotate(-90 "+(-GUT/2).toFixed(2)+" "+(y+h/2).toFixed(2)+")");
-        num.textContent = isDone ? "\u2713" : String(r.n);
-        g.appendChild(num);
-      }
-      if (opts.tappable){
-        var hit = mk("rect", { x:-GUT, y:y.toFixed(2), width:W, height:h.toFixed(2),
-                               fill:"transparent" });
-        hit.style.cursor = "pointer";
-        (function(n){
-          hit.addEventListener("click", function(){ if (!OV.panned) goToRow(n); });
-        })(r.n);
-        g.appendChild(hit);
-      }
+      y += h;
     }
     return svg;
-  }
-
-  // ---------- fullscreen overlay ----------
-  var OV = { open:false, rotated:false, scale:1, tx:0, ty:0, panned:false };
-
-  function openOverlay(){
-    OV.open = true;
-    $("fl-ov").classList.add("on");
-    buildOverlayBar();
-    drawOverlay();
-    fitOverlay();
-  }
-  function closeOverlay(){
-    OV.open = false;
-    $("fl-ov").classList.remove("on");
-  }
-  function buildOverlayBar(){
-    var bar = $("fl-ov-bar"); clear(bar);
-    var close = el("button","close"); close.textContent = "\u2715 Close";
-    close.addEventListener("click", closeOverlay);
-    bar.appendChild(close);
-
-    var rot = el("button", OV.rotated ? "on" : "");
-    rot.textContent = "\u21bb Rotate";
-    rot.addEventListener("click", function(){
-      OV.rotated = !OV.rotated;
-      buildOverlayBar(); drawOverlay(); fitOverlay();
-    });
-    bar.appendChild(rot);
-
-    var fit = el("button",""); fit.textContent = "Fit";
-    fit.addEventListener("click", fitOverlay);
-    bar.appendChild(fit);
-
-    VIEWS.forEach(function(v){
-      var b = el("button", S.view === v.id ? "on" : "");
-      b.textContent = v.name;
-      b.addEventListener("click", function(){
-        S.view = v.id;
-        buildOverlayBar(); drawOverlay();
-        renderLayout();
-      });
-      bar.appendChild(b);
-    });
-  }
-  function drawOverlay(){
-    var stage = $("fl-ov-stage"); clear(stage);
-    var svg = buildSvg(S.cands[S.active], S.cfg,
-                       { view:S.view, rotated:OV.rotated, gutter:true, tappable:true });
-    stage.appendChild(svg);
-    applyTransform();
-
-    var foot = $("fl-ov-foot");
-    clear(foot);
-    var cur = currentRow();
-    foot.textContent = cur
-      ? "Pinch to zoom \u00b7 tap any row to open its cuts \u00b7 next up: row " + cur
-      : (S.cfg.nRows + " of " + S.cfg.nRows + " rows done \u2014 pinch to zoom, tap a row to review");
-  }
-  function stageSize(){
-    var s = $("fl-ov-stage");
-    return { w: s.clientWidth, h: s.clientHeight };
-  }
-  function contentSize(){
-    var GUT = 17;
-    return OV.rotated
-      ? { w: S.cfg.acrossIn, h: S.cfg.runIn + GUT }
-      : { w: S.cfg.runIn + GUT, h: S.cfg.acrossIn };
-  }
-  function fitOverlay(){
-    var st = stageSize(), c = contentSize();
-    if (!st.w || !st.h) return;
-    var s = Math.min(st.w / c.w, st.h / c.h) * 0.96;
-    OV.scale = s;
-    OV.tx = (st.w - c.w*s)/2;
-    OV.ty = (st.h - c.h*s)/2;
-    applyTransform();
-  }
-  function applyTransform(){
-    var svg = $("fl-ov-stage").querySelector("svg");
-    if (!svg) return;
-    var c = contentSize();
-    svg.setAttribute("width", c.w);
-    svg.setAttribute("height", c.h);
-    svg.style.transform = "translate(" + OV.tx + "px," + OV.ty + "px) scale(" + OV.scale + ")";
-  }
-
-  // Pinch-zoom and pan. iOS Safari will not let a web app lock orientation, so
-  // "rotate your phone" cannot be a button — the Rotate control turns the drawing
-  // instead, which works everywhere and needs no permission.
-  (function bindGestures(){
-    var stage = $("fl-ov-stage");
-    var pts = {}, startDist = 0, startScale = 1, startMid = null, startTx = 0, startTy = 0;
-    var downAt = null;
-
-    stage.addEventListener("pointerdown", function(e){
-      stage.setPointerCapture(e.pointerId);
-      pts[e.pointerId] = { x:e.clientX, y:e.clientY };
-      var ids = Object.keys(pts);
-      OV.panned = false;
-      if (ids.length === 1){
-        downAt = { x:e.clientX, y:e.clientY, tx:OV.tx, ty:OV.ty };
-      } else if (ids.length === 2){
-        var a = pts[ids[0]], b = pts[ids[1]];
-        startDist = Math.hypot(a.x-b.x, a.y-b.y) || 1;
-        startScale = OV.scale;
-        var rect = stage.getBoundingClientRect();
-        startMid = { x:(a.x+b.x)/2 - rect.left, y:(a.y+b.y)/2 - rect.top };
-        startTx = OV.tx; startTy = OV.ty;
-        downAt = null;
-      }
-    });
-
-    stage.addEventListener("pointermove", function(e){
-      if (!pts[e.pointerId]) return;
-      pts[e.pointerId] = { x:e.clientX, y:e.clientY };
-      var ids = Object.keys(pts);
-
-      if (ids.length >= 2 && startMid){
-        var a = pts[ids[0]], b = pts[ids[1]];
-        var dist = Math.hypot(a.x-b.x, a.y-b.y) || 1;
-        var next = Math.min(12, Math.max(0.05, startScale * (dist/startDist)));
-        // keep the point under the fingers pinned while scaling
-        OV.tx = startMid.x - (startMid.x - startTx) * (next/startScale);
-        OV.ty = startMid.y - (startMid.y - startTy) * (next/startScale);
-        OV.scale = next;
-        OV.panned = true;
-        applyTransform();
-      } else if (ids.length === 1 && downAt){
-        var dx = e.clientX - downAt.x, dy = e.clientY - downAt.y;
-        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) OV.panned = true;
-        OV.tx = downAt.tx + dx;
-        OV.ty = downAt.ty + dy;
-        applyTransform();
-      }
-    });
-
-    function up(e){
-      delete pts[e.pointerId];
-      if (Object.keys(pts).length < 2){ startMid = null; }
-      if (Object.keys(pts).length === 0){ downAt = null; }
-      // OV.panned stays true until the next pointerdown, so the click that
-      // follows a drag doesn't fire a row jump.
-    }
-    stage.addEventListener("pointerup", up);
-    stage.addEventListener("pointercancel", up);
-  })();
-
-  // Tapping a row in the diagram lands you on that row's cuts.
-  function goToRow(n){
-    S.jumpTo = n;
-    closeOverlay();
-    switchScreen("s-cuts");
   }
 
   // ---------- layout screen ----------
@@ -1885,81 +1476,48 @@ var FL = (function(){
     var lbl=el("p","lbl"); lbl.textContent="Layout "+(S.active+1)+" of "+Math.min(S.cands.length,6);
     card.appendChild(lbl);
 
-    var chips=el("div","fl-views");
-    VIEWS.forEach(function(v){
-      var b=el("button", S.view===v.id ? "fl-chip on" : "fl-chip");
-      b.textContent=v.name;
-      b.addEventListener("click", function(){ S.view=v.id; renderLayout(); });
-      chips.appendChild(b);
-    });
-    card.appendChild(chips);
-
     var scroll=el("div","fl-scroll");
-    var svg = buildSvg(cand, cfg, { view:S.view, rotated:false, gutter:true, tappable:false });
-    svg.setAttribute("width", Math.max(660, Math.round(cfg.runIn*1.3)));
-    scroll.appendChild(svg);
+    scroll.appendChild(svgDiagram(cand,cfg));
     card.appendChild(scroll);
-
     var hint=el("p","fl-hint");
-    hint.textContent="Scroll sideways \u2014 or expand for the whole room";
+    hint.textContent="Scroll sideways for the full "+fmtFt(cfg.runIn)+" run";
     card.appendChild(hint);
 
-    if (LEGENDS[S.view]){
-      var lg=el("div","fl-legend");
-      LEGENDS[S.view].forEach(function(pair){
-        var sp=el("span");
-        var sw=el("i"); sw.style.background=pair[0];
-        if (pair[0]==="#F7F5EF"||pair[0]==="#FFF4DE") sw.style.border=".5px solid #B9B7AE";
-        sp.appendChild(sw);
-        sp.appendChild(document.createTextNode(pair[1]));
-        lg.appendChild(sp);
-      });
-      card.appendChild(lg);
-    }
+    var stats=el("div","fl-stats");
+    stats.appendChild(statBox(String(cfg.nRows), "Rows"));
+    stats.appendChild(statBox(S.box.boxes+" boxes", S.box.planks+" planks"));
+    stats.appendChild(statBox(pct(cand.waste, cfg)+"%", "Offcut waste"));
+    stats.appendChild(statBox(inch(cfg.edgeRip), "First / last row"));
+    card.appendChild(stats);
 
-    var exp=el("button","fl-expand");
-    exp.textContent="\u2922  Expand \u00b7 zoom \u00b7 tap a row";
-    exp.addEventListener("click", openOverlay);
-    card.appendChild(exp);
-
-    if (hasProgress()) card.appendChild(progressBlock());
-    body.appendChild(card);
-
-    var stats=el("div","card");
-    var sl=el("p","lbl"); sl.textContent="Numbers"; stats.appendChild(sl);
-    var grid=el("div","fl-stats");
-    grid.appendChild(statBox(String(cfg.nRows), "Rows"));
-    grid.appendChild(statBox(S.box.boxes+" boxes", S.box.planks+" planks"));
-    grid.appendChild(statBox(pct(cand.waste, cfg)+"%", "Offcut waste"));
-    grid.appendChild(statBox(inch(cfg.edgeRip), "First / last row"));
-    stats.appendChild(grid);
-
-    var btn=el("button","btn");
+    var btn=el("button","btn"); btn.id="f-btn-reshuffle";
     btn.textContent="Reshuffle";
     btn.addEventListener("click", reshuffle);
-    stats.appendChild(btn);
-    body.appendChild(stats);
+    card.appendChild(btn);
+    body.appendChild(card);
 
+    // The honest part: show whether the layout actually passed, not just that it ran.
     var chk=el("div","card");
     var cl=el("p","lbl"); cl.textContent="Checks"; chk.appendChild(cl);
     chk.appendChild(checkLine(cand.violations===0,
-      cand.violations===0 ? "No H-joints \u2014 every row clears the one above"
+      cand.violations===0 ? "No H-joints — every row clears the one above"
                           : cand.violations+" joint(s) closer than "+inch(cfg.minOff)));
     chk.appendChild(checkLine(cand.violations===0,
       "Every row also clears the row two above"));
     chk.appendChild(checkLine(cand.relaxed===0,
       cand.relaxed===0 ? "No row needed relaxed clearance"
-                       : cand.relaxed+" row(s) relaxed \u2014 this room and plank are tight"));
+                       : cand.relaxed+" row(s) relaxed — this room and plank are tight"));
     chk.appendChild(checkLine(cfg.edgeRip >= cfg.minRip,
-      cfg.edgeRip >= cfg.minRip ? "First and last row are "+inch(cfg.edgeRip)+" \u2014 no slivers"
-                                : "First / last row is only "+inch(cfg.edgeRip)+" \u2014 under your "+inch(cfg.minRip)+" floor"));
+      cfg.edgeRip >= cfg.minRip ? "First and last row are "+inch(cfg.edgeRip)+" — no slivers"
+                                : "First / last row is only "+inch(cfg.edgeRip)+" — under your "+inch(cfg.minRip)+" floor"));
 
     var locked = isLocked(cand, cfg);
     chk.appendChild(checkLine(!locked,
-      locked ? "Pattern repeats every " + cand.period + " rows \u2014 it will read as a staircase"
-             : "Starts vary across " + cand.unique + " of " + cfg.nRows + " rows \u2014 no repeating step"));
+      locked ? "Pattern repeats every " + cand.period + " rows — it will read as a staircase"
+             : "Starts vary across " + cand.unique + " of " + cfg.nRows + " rows — no repeating step"));
     body.appendChild(chk);
 
+    // The whole point of the tool: say why the floor will look wrong, and what fixes it.
     if (locked){
       var warn=el("div","card");
       var wl=el("p","lbl"); wl.textContent="Your rules are forcing the pattern";
@@ -1982,21 +1540,6 @@ var FL = (function(){
     }
   }
 
-  function progressBlock(){
-    var d=el("div","fl-prog");
-    var top=el("div","fl-prog-top");
-    var a=el("span"); a.textContent = doneCount() + " of " + S.cfg.nRows + " rows laid";
-    var cur = currentRow();
-    var b=el("span"); b.textContent = cur ? "next: row " + cur : "complete";
-    top.appendChild(a); top.appendChild(b);
-    d.appendChild(top);
-    var bar=el("div","fl-prog-bar");
-    var fill=el("div","fl-prog-fill");
-    fill.style.width = Math.round(doneCount()/S.cfg.nRows*100) + "%";
-    bar.appendChild(fill); d.appendChild(bar);
-    return d;
-  }
-
   function statBox(big, small){
     var d=el("div","fl-stat");
     var b=el("b"); b.textContent=big; d.appendChild(b);
@@ -2015,10 +1558,10 @@ var FL = (function(){
   }
   function inch(v){
     var r=Math.round(v*16)/16;
-    return (Math.abs(r-Math.round(r))<0.001 ? String(Math.round(r)) : String(r)) + "\u2033";
+    return (Math.abs(r-Math.round(r))<0.001 ? String(Math.round(r)) : r.toFixed(2).replace(/0+$/,"")) + "\u2033";
   }
 
-  // ---------- cut list / install ----------
+  // ---------- cut list ----------
   function renderCuts(){
     var body=$("cuts-body"); clear(body);
     if (!S.cands.length){
@@ -2026,78 +1569,21 @@ var FL = (function(){
       return;
     }
     var cand=S.cands[S.active], cfg=S.cfg;
-    var cur = currentRow();
-
-    var head=el("div","card");
-    var hl=el("p","lbl"); hl.textContent = cur ? "Now laying \u2014 row " + cur : "All rows laid";
-    head.appendChild(hl);
-
-    if (cur){
-      var r = cand.rows[cur-1];
-      var big=el("p"); big.style.fontSize="15px"; big.style.margin="0 0 2px"; big.style.fontWeight="600";
-      big.textContent = r.pieces.map(function(p){
-        return Math.abs(p-cfg.plankLen)<0.001 ? "full" : inch(p);
-      }).join("  \u00b7  ");
-      head.appendChild(big);
-      var sub=el("p"); sub.style.fontSize="12.5px"; sub.style.color="var(--muted)"; sub.style.margin="0";
-      sub.textContent = r.src;
-      head.appendChild(sub);
-
-      var done=el("button","fl-done-btn");
-      done.textContent = "\u2713  Row " + cur + " complete";
-      done.addEventListener("click", function(){ toggleRow(cur); });
-      head.appendChild(done);
-    } else {
-      var p=el("p"); p.style.fontSize="13px"; p.style.color="var(--muted)"; p.style.margin="0";
-      p.textContent = "Every row is ticked off. Tap any row below to reopen it.";
-      head.appendChild(p);
-    }
-
-    head.appendChild(progressBlock());
-
-    var back=el("button","fl-undo-btn");
-    back.textContent = "\u2922  Back to the wide view";
-    back.addEventListener("click", openOverlay);
-    head.appendChild(back);
-
-    if (hasProgress()){
-      var cl=el("button","fl-clear-btn");
-      cl.textContent = "Clear progress";
-      cl.addEventListener("click", clearProgress);
-      head.appendChild(cl);
-    }
-    body.appendChild(head);
 
     var card=el("div","card");
-    var lbl=el("p","lbl"); lbl.textContent="Cut sequence \u2014 tap a row to tick it off";
+    var lbl=el("p","lbl"); lbl.textContent="Cut sequence — row by row";
     card.appendChild(lbl);
-    cand.rows.forEach(function(r){ card.appendChild(cutRow(r, cfg, cur)); });
+    cand.rows.forEach(function(r){ card.appendChild(cutRow(r, cfg)); });
     body.appendChild(card);
 
     body.appendChild(boxCard(cfg));
-
-    // Land on the row the diagram sent us to.
-    if (S.jumpTo){
-      var target = document.getElementById("fl-r-" + S.jumpTo);
-      S.jumpTo = null;
-      if (target && target.scrollIntoView) {
-        window.setTimeout(function(){ target.scrollIntoView({ block:"center" }); }, 30);
-      }
-    }
   }
 
-  function cutRow(r, cfg, cur){
-    var isDone = !!S.done[r.n], isNow = (r.n === cur);
-    var cls = "fl-row fl-tapzone" + (isDone ? " done" : "") + (isNow ? " now" : "");
-    var row=el("div", cls);
-    row.id = "fl-r-" + r.n;
-    row.addEventListener("click", function(){ toggleRow(r.n); });
-
-    var n=el("div", isDone ? "fl-rn tick" : "fl-rn");
-    n.textContent = isDone ? "\u2713" : String(r.n);
-    row.appendChild(n);
-
+  function cutRow(r, cfg){
+    var row=el("div","fl-row");
+    var n=el("div","fl-rn"); n.textContent=r.n; row.appendChild(n);
     var b=el("div","fl-rb");
+
     var cuts=el("div","fl-cuts");
     cuts.textContent = r.pieces.map(function(p){
       return Math.abs(p-cfg.plankLen)<0.001 ? "full" : inch(p);
@@ -2125,7 +1611,8 @@ var FL = (function(){
 
   // Box rotation. The stagger can be perfect and the floor still read as fake if
   // every plank comes off the same box in printed order — laminate repeats its
-  // photo every 6-10 planks.
+  // photo every 6-10 planks. So the plan says which box to pull from, not just
+  // what length to cut.
   function boxCard(cfg){
     var card=el("div","card");
     var lbl=el("p","lbl"); lbl.textContent="Boxes";
@@ -2178,16 +1665,14 @@ var FL = (function(){
     h.appendChild(stats);
 
     var sc=el("div","fl-scroll");
-    var svg = buildSvg(cand, cfg, { view:"install", rotated:false, gutter:true, tappable:false });
-    svg.setAttribute("width", Math.max(660, Math.round(cfg.runIn*1.3)));
-    sc.appendChild(svg);
+    sc.appendChild(svgDiagram(cand,cfg));
     h.appendChild(sc);
     area.appendChild(h);
 
     var c=el("div","card");
     var cl=el("p","lbl"); cl.textContent="Cut sequence";
     c.appendChild(cl);
-    cand.rows.forEach(function(r){ c.appendChild(cutRow(r, cfg, null)); });
+    cand.rows.forEach(function(r){ c.appendChild(cutRow(r,cfg)); });
     area.appendChild(c);
 
     area.appendChild(boxCard(cfg));
@@ -2197,8 +1682,7 @@ var FL = (function(){
     generate: generate,
     renderLayout: renderLayout,
     renderCuts: renderCuts,
-    buildPrintArea: buildPrintArea,
-    closeOverlay: closeOverlay
+    buildPrintArea: buildPrintArea
   };
 })();
 
