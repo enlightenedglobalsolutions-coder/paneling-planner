@@ -1,0 +1,668 @@
+<!--
+=============================================================================
+  EGS Paneling Layout Planner
+  A product of Enlightened Global Solutions (EGS)
+
+  Copyright (c) 2026 Enlightened Global Solutions
+  All rights reserved.
+
+  Unauthorised copying, modification, distribution or commercial use
+  of this software is strictly prohibited.
+
+  Website:  https://enlightenedglobalsolutions-coder.github.io/paneling-planner
+  License:  See LICENSE file for full terms
+=============================================================================
+  v1 — Paneling mode (ceiling / wall). Flooring module to follow as a
+  cleanly separable block (see spec). Single-file PWA, offline-first.
+=============================================================================
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#042C53">
+<title>EGS Paneling Planner</title>
+<style>
+  :root{
+    --deep:#042C53; --royal:#185FA5; --sky:#378ADD; --tint:#E6F1FB;
+    --ink:#0C447C; --mid:#0C447C; --paper:#FFFFFF; --bg:#F1EFE8;
+    --line:#D3D1C7; --muted:#5F5E5A; --faint:#888780; --dark:#26261f;
+    --ok:#3B6D11; --okbg:#EAF3DE; --okline:#97C459;
+    --warn:#854F0B; --warnbg:#FAEEDA; --warnline:#EF9F27;
+    --nav-h:64px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg); color:var(--dark); line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{max-width:480px;margin:0 auto;min-height:100%;
+    padding-bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));
+    position:relative}
+  header.top{background:var(--deep);color:#fff;
+    padding:calc(12px + env(safe-area-inset-top)) 16px 12px;
+    position:sticky;top:0;z-index:30}
+  header.top h1{margin:0;font-size:16px;font-weight:800;letter-spacing:.2px}
+  header.top .sub{font-size:11px;color:#9ec2e8;margin-top:2px}
+  .modebar{display:flex;background:#0a3865;border-radius:9px;padding:3px;margin-top:10px}
+  .modebar button{flex:1;padding:8px;font-size:13px;font-weight:600;border:none;
+    border-radius:7px;background:transparent;color:#9ec2e8;cursor:pointer}
+  .modebar button.on{background:var(--royal);color:#fff}
+  .modebar button.soon{opacity:.5}
+
+  .screen{display:none;padding:16px}
+  .screen.active{display:block}
+
+  .card{background:var(--paper);border:.5px solid var(--line);border-radius:12px;
+    padding:14px;margin-bottom:12px}
+  .card.bg{background:var(--bg)}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+    color:var(--faint);margin:0 0 10px;font-weight:600}
+
+  .field{margin-bottom:12px}
+  .field:last-child{margin-bottom:0}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600}
+  .field .hint{font-size:11px;color:var(--faint);font-weight:400}
+  .inrow{display:flex;align-items:center;gap:8px}
+  input[type=number],input[type=text],select{
+    width:100%;padding:11px 12px;font-size:16px;border:.5px solid var(--line);
+    border-radius:8px;background:#fff;color:var(--dark);font-family:inherit}
+  input:focus,select:focus{outline:2px solid var(--sky);outline-offset:-1px;border-color:var(--sky)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .unit{font-size:13px;color:var(--faint);white-space:nowrap}
+
+  .btn{display:block;width:100%;text-align:center;background:var(--sky);color:#fff;
+    border:none;border-radius:9px;padding:14px;font-size:15px;font-weight:700;
+    cursor:pointer;font-family:inherit}
+  .btn:active{background:var(--royal)}
+  .btn.ghost{background:var(--tint);color:var(--ink);border:.5px solid var(--royal)}
+  .btn.row{display:inline-block;width:auto;padding:11px 18px;font-size:14px}
+  .btnrow{display:flex;gap:10px}
+  .btnrow .btn{flex:1}
+
+  .diagwrap{background:#fff;border:.5px solid var(--line);border-radius:10px;padding:10px;overflow:hidden}
+  svg.dg{display:block;width:100%;height:auto}
+  .optbar{display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:10px}
+  .optbar .who{font-size:12px;color:var(--muted);font-weight:600}
+  .tag{display:inline-block;background:var(--tint);color:var(--ink);border-radius:20px;
+    padding:3px 10px;font-size:11px;font-weight:600}
+
+  .takeoff{background:var(--okbg);border:.5px solid var(--okline);border-radius:12px;padding:14px;margin-bottom:12px}
+  .takeoff .lbl{color:var(--ok)}
+  .takeoff .big{font-size:16px;font-weight:800;color:#27500A}
+  .takeoff .sub{font-size:12px;color:var(--ok);margin-top:3px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .chip{background:#fff;border:.5px solid var(--okline);border-radius:20px;padding:5px 11px;font-size:12px;color:#27500A;font-weight:600}
+  .chip.warn{background:var(--warnbg);border-color:var(--warnline);color:var(--warn)}
+
+  .cutlist .r{display:flex;justify-content:space-between;align-items:center;
+    padding:9px 2px;border-bottom:.5px solid #E4E2DA;font-size:14px}
+  .cutlist .r:last-child{border-bottom:none}
+  .cutlist .rn{color:var(--faint);font-weight:700;font-size:12px;min-width:52px}
+  .cutlist .seg{color:var(--dark);text-align:right;flex:1}
+  .flag{color:var(--warn);font-size:10px;background:var(--warnbg);border-radius:4px;
+    padding:1px 6px;margin-left:6px;white-space:nowrap;font-weight:600}
+
+  .empty{text-align:center;color:var(--faint);font-size:14px;padding:30px 16px;line-height:1.6}
+  .empty b{color:var(--muted)}
+
+  nav.bottom{position:fixed;left:0;right:0;bottom:0;background:#fff;
+    border-top:.5px solid var(--line);display:flex;z-index:40;
+    padding-bottom:env(safe-area-inset-bottom);max-width:480px;margin:0 auto}
+  nav.bottom button{flex:1;background:none;border:none;padding:9px 4px 8px;
+    font-size:10.5px;color:var(--faint);cursor:pointer;font-family:inherit;font-weight:600}
+  nav.bottom button .ic{display:block;font-size:19px;line-height:1;margin-bottom:3px}
+  nav.bottom button.on{color:var(--royal)}
+
+  .foot{font-size:10px;color:var(--faint);text-align:center;padding:4px 0 2px}
+
+  @media print{
+    header.top,nav.bottom,.modebar,.btn,.optbar,.diagwrap{display:none !important}
+    .screen{display:block !important;padding:0}
+    body{background:#fff}
+    .card,.takeoff{border:none;padding:4px 0}
+    .print-title{display:block !important}
+  }
+  .print-title{display:none;font-size:18px;font-weight:800;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>EGS Paneling Planner</h1>
+    <div class="sub">Ceiling &amp; wall board layouts</div>
+    <div class="modebar">
+      <button id="mode-panel" class="on">Paneling</button>
+      <button id="mode-floor" class="soon" title="Coming next">Flooring · soon</button>
+    </div>
+  </header>
+
+  <!-- ===== SETUP SCREEN ===== -->
+  <section class="screen active" id="s-setup">
+    <div class="card">
+      <p class="lbl">Room</p>
+      <div class="grid2">
+        <div class="field">
+          <label>Width — run <span class="hint">ft</span></label>
+          <input type="number" id="i-width" inputmode="decimal" step="0.01" value="22">
+        </div>
+        <div class="field">
+          <label>Depth <span class="hint">ft</span></label>
+          <input type="number" id="i-depth" inputmode="decimal" step="0.01" value="12">
+        </div>
+      </div>
+      <div class="field">
+        <label>Board face width <span class="hint">inches</span></label>
+        <input type="number" id="i-face" inputmode="decimal" step="0.125" value="5">
+      </div>
+      <div class="field">
+        <label>Expansion gap <span class="hint">inches, per side</span></label>
+        <input type="number" id="i-gap" inputmode="decimal" step="0.0625" value="0.25">
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="lbl">Trusses</p>
+      <div class="grid2">
+        <div class="field">
+          <label>1st truss off wall <span class="hint">inches</span></label>
+          <input type="number" id="i-offset" inputmode="decimal" step="0.5" value="18">
+        </div>
+        <div class="field">
+          <label>Spacing o.c. <span class="hint">inches</span></label>
+          <select id="i-oc"><option value="24">24″</option><option value="16">16″</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="lbl">Boards</p>
+      <div class="field">
+        <label>Stock length <span class="hint">ft — full boards you'll buy</span></label>
+        <input type="number" id="i-stock" inputmode="decimal" step="0.5" value="12">
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label>Max handle length <span class="hint">ft — hard cap</span></label>
+          <input type="number" id="i-max" inputmode="decimal" step="0.5" value="16">
+        </div>
+        <div class="field">
+          <label>Pine buffer <span class="hint">%</span></label>
+          <input type="number" id="i-buffer" inputmode="numeric" step="1" value="12">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn" id="btn-generate">Generate layout options</button>
+    <p class="foot">Pine estimates only — cull damaged ends as you go.</p>
+  </section>
+
+  <!-- ===== LAYOUT SCREEN ===== -->
+  <section class="screen" id="s-layout">
+    <div id="layout-body"></div>
+  </section>
+
+  <!-- ===== CUT LIST SCREEN ===== -->
+  <section class="screen" id="s-cuts">
+    <div id="cuts-body"></div>
+  </section>
+
+  <!-- ===== PRINT SCREEN ===== -->
+  <section class="screen" id="s-print">
+    <div class="card">
+      <p class="lbl">Print / save</p>
+      <p style="font-size:14px;color:var(--muted);margin:0 0 14px">
+        Sends the current layout, takeoff and cut list to your phone's print dialog —
+        choose <b>Save as PDF</b> to keep or share it. Works offline.
+      </p>
+      <button class="btn" id="btn-print">Open print sheet</button>
+    </div>
+    <div id="print-area"></div>
+  </section>
+
+  <nav class="bottom">
+    <button data-screen="s-setup" class="on"><span class="ic">▤</span>Setup</button>
+    <button data-screen="s-layout"><span class="ic">▦</span>Layout</button>
+    <button data-screen="s-cuts"><span class="ic">☰</span>Cut list</button>
+    <button data-screen="s-print"><span class="ic">⎙</span>Print</button>
+  </nav>
+</div>
+
+<script>
+"use strict";
+
+// ============================================================
+//  EGS Paneling Planner v1 — paneling engine + UI
+//  (Flooring engine will live in its own block below this one.)
+// ============================================================
+
+var STATE = {
+  options: [],     // generated layout options
+  active: 0,       // index of chosen option
+  inputs: null     // last-used inputs snapshot
+};
+
+// ---------- helpers ----------
+function $(id){ return document.getElementById(id); }
+function num(id){ var v = parseFloat($(id).value); return isNaN(v) ? 0 : v; }
+function ftToIn(ft){ return ft * 12; }
+function fmtFt(inches){
+  var neg = inches < 0; inches = Math.abs(inches);
+  var f = Math.floor(inches / 12);
+  var i = Math.round((inches - f*12) * 100) / 100;
+  if (i >= 12){ f += 1; i -= 12; }
+  var s = f + "′";
+  if (i > 0.001){ s += " " + (Math.round(i*100)/100) + "″"; }
+  return (neg ? "-" : "") + s;
+}
+
+// ---------- truss grid ----------
+// Everything references the first-truss offset. Trusses at:
+//   offset, offset+oc, offset+2*oc ... up to the working run.
+function buildTrusses(runIn, offset, oc){
+  var t = [];
+  for (var p = offset; p <= runIn + 0.01; p += oc){ t.push(Math.round(p*100)/100); }
+  return t;
+}
+
+// ---------- layout generation ----------
+// A "layout" = for each row, an ordered list of joint truss-indices.
+// Rule set (paneling):
+//  - joints land only on trusses
+//  - no segment longer than min(stock, maxHandle) working span
+//  - 2-bay alternating swing is the default rhythm (Layout 2)
+//  - adjacent rows never share a joint truss
+//  - 1-bay stagger rationed (handled by the swing choice)
+function segLengthsForRow(trusses, jointIdx, runIn){
+  // returns array of segment lengths (inches) given joint positions
+  var pts = [0].concat(jointIdx.map(function(i){ return trusses[i]; })).concat([runIn]);
+  var segs = [];
+  for (var k=1;k<pts.length;k++){ segs.push(Math.round((pts[k]-pts[k-1])*100)/100); }
+  return segs;
+}
+
+function maxSeg(segs){ return segs.reduce(function(m,s){ return s>m?s:m; }, 0); }
+
+// choose joint truss indices for a row so NO segment exceeds capIn.
+// This guarantee comes first; the alternating swing is a secondary preference
+// applied only among legal choices. phaseBias shifts which legal truss we pick
+// (0 = latest legal truss, 1 = one bay earlier) to create the row-to-row swing.
+function jointsForRow(trusses, runIn, capIn, phaseBias){
+  var joints = [];
+  var lastPos = 0;
+  var n = trusses.length;
+  var safety = 0;
+
+  while ((runIn - lastPos) > capIn && safety < 200){
+    safety++;
+    // find the furthest truss still within cap of lastPos
+    var best = -1;
+    for (var i = 0; i < n; i++){
+      if (trusses[i] <= lastPos) continue;          // must move forward
+      if ((trusses[i] - lastPos) <= capIn) best = i; // furthest legal so far
+      else break;                                    // trusses are sorted; no point continuing
+    }
+    if (best === -1){
+      // no truss within cap — cannot place a legal joint; bail (shouldn't happen
+      // when cap >= oc, which we validate on input)
+      break;
+    }
+    // apply swing: step back by phaseBias bays if that stays legal AND still
+    // leaves the remainder coverable
+    var pick = best;
+    var back = phaseBias;
+    while (back > 0 && pick - 1 >= 0){
+      var cand = pick - 1;
+      if (trusses[cand] <= lastPos) break;                 // can't go before current pos
+      if ((trusses[cand] - lastPos) > capIn) break;        // would be illegal (shouldn't)
+      pick = cand; back--;
+    }
+    // don't repeat the same truss
+    if (joints.length && pick <= joints[joints.length-1]) pick = best;
+    joints.push(pick);
+    lastPos = trusses[pick];
+  }
+  return joints;
+}
+
+function generateLayouts(inp){
+  var runIn = inp.runIn, trusses = inp.trusses;
+  var capIn = Math.min(inp.stockIn, inp.maxIn);
+  var rows = inp.rows;
+  var options = [];
+
+  // We produce a few rhythm variants. phaseBias = how many bays to step the
+  // joint back from the furthest-legal truss, alternated row to row to create
+  // the 2-bay swing. Segment legality is guaranteed regardless of these values.
+  var variants = [
+    { name:"2-bay swing",   phases:[0,2] },
+    { name:"1-bay swing",   phases:[0,1] },
+    { name:"offset swing",  phases:[1,2] }
+  ];
+
+  variants.forEach(function(v){
+    var rowJoints = [];
+    var lastRowJoints = null;
+    for (var r=0;r<rows;r++){
+      var phase = v.phases[r % v.phases.length];
+      var j = jointsForRow(trusses, runIn, capIn, phase);
+      // enforce: adjacent rows never share a joint truss
+      if (lastRowJoints){
+        j = j.map(function(idx){
+          var guard = 0;
+          while (lastRowJoints.indexOf(idx) !== -1 && guard < trusses.length){
+            idx = (idx + 1) % trusses.length; guard++;
+          }
+          return idx;
+        });
+        j.sort(function(a,b){return a-b;});
+      }
+      rowJoints.push(j);
+      lastRowJoints = j;
+    }
+    options.push({ name:v.name, rowJoints:rowJoints });
+  });
+
+  return options;
+}
+
+// ---------- takeoff ----------
+function computeTakeoff(inp, option){
+  var runIn = inp.runIn, trusses = inp.trusses, rows = inp.rows;
+  var stockIn = inp.stockIn;
+  var totalUsedIn = 0, totalStockIn = 0, shortEnds = 0;
+  var SHORT = 24; // segments under 2ft flagged as short
+
+  option.rowJoints.forEach(function(j){
+    var segs = segLengthsForRow(trusses, j, runIn);
+    segs.forEach(function(s){
+      totalUsedIn += s;
+      if (s < SHORT) shortEnds++;
+    });
+  });
+
+  // boards: each row needs ceil(run / stock) fresh boards before offcut reuse.
+  // We approximate reuse: total linear inches / stock length, rounded up,
+  // then note leftover full boards separately.
+  var perRowBoards = Math.ceil(runIn / stockIn);
+  var naiveBoards = perRowBoards * rows;
+
+  // offcut-reuse estimate: theoretical = ceil(total covered / stock)
+  var coveredIn = runIn * rows;
+  var theoretical = Math.ceil(coveredIn / stockIn);
+  // reuse can't beat naive by more than the offcut supply; clamp sensibly
+  if (theoretical > naiveBoards) theoretical = naiveBoards;
+
+  var withBuffer = Math.ceil(theoretical * (1 + inp.buffer/100));
+
+  // waste = stock consumed (theoretical*stock) minus covered, as % of consumed
+  var consumedIn = theoretical * stockIn;
+  var wastePct = consumedIn > 0 ? Math.round(((consumedIn - coveredIn)/consumedIn)*1000)/10 : 0;
+  if (wastePct < 0) wastePct = 0;
+
+  var leftover = withBuffer - theoretical;
+
+  return {
+    theoretical: theoretical,
+    withBuffer: withBuffer,
+    wastePct: wastePct,
+    leftover: leftover,
+    shortEnds: shortEnds,
+    rows: rows
+  };
+}
+
+// ---------- read inputs ----------
+function readInputs(){
+  var gap = num("i-gap");
+  var widthIn = ftToIn(num("i-width")) - 2*gap;   // working run
+  var depthIn = ftToIn(num("i-depth")) - 2*gap;   // working depth
+  var face = num("i-face");
+  var offset = num("i-offset");
+  var oc = parseFloat($("i-oc").value);
+  var stockIn = ftToIn(num("i-stock"));
+  var maxIn = ftToIn(num("i-max"));
+  var buffer = num("i-buffer");
+
+  var runIn = widthIn;
+  var rows = Math.max(1, Math.ceil(depthIn / face));
+  var trusses = buildTrusses(runIn, offset, oc);
+
+  return {
+    runIn:runIn, depthIn:depthIn, face:face, offset:offset, oc:oc,
+    stockIn:stockIn, maxIn:maxIn, buffer:buffer, rows:rows, trusses:trusses, gap:gap
+  };
+}
+
+// ---------- diagram ----------
+function drawDiagram(inp, option, showRows){
+  var W = 320, top = 26, rh = 16;
+  var runIn = inp.runIn, trusses = inp.trusses;
+  var rows = Math.min(showRows || inp.rows, 8);
+  var left = 10, right = W-10, span = right-left;
+  function ix(inches){ return left + span*(inches/runIn); }
+
+  var h = top + rows*rh + 26;
+  var s = '<svg class="dg" viewBox="0 0 '+W+' '+h+'" role="img" aria-label="Ceiling paneling layout, first truss offset from wall, joints on trusses">';
+
+  // 18-style offset marker
+  s += '<text x="'+left+'" y="'+(top-12)+'" font-size="8" fill="#B0873A" font-family="sans-serif">'+inp.offset+'″</text>';
+
+  // truss lines + numbers
+  trusses.forEach(function(p,i){
+    var x = ix(p);
+    s += '<line x1="'+x.toFixed(1)+'" y1="'+(top-8)+'" x2="'+x.toFixed(1)+'" y2="'+(top+rows*rh)+'" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="4 3"/>';
+    s += '<text x="'+x.toFixed(1)+'" y="'+(top-12)+'" font-size="7" fill="#888780" font-family="sans-serif" text-anchor="middle">'+(i+1)+'</text>';
+  });
+
+  // rows + joints
+  for (var r=0;r<rows;r++){
+    var y = top + r*rh;
+    s += '<rect x="'+left+'" y="'+(y+2)+'" width="'+span+'" height="'+(rh-4)+'" fill="#DCEAFB" stroke="#B5D4F4" stroke-width="0.5"/>';
+    var j = option.rowJoints[r] || [];
+    j.forEach(function(idx){
+      if (trusses[idx]==null) return;
+      var x = ix(trusses[idx]);
+      s += '<line x1="'+x.toFixed(1)+'" y1="'+(y+2)+'" x2="'+x.toFixed(1)+'" y2="'+(y+rh-2)+'" stroke="#042C53" stroke-width="2"/>';
+    });
+  }
+
+  s += '<text x="'+left+'" y="'+(top+rows*rh+16)+'" font-size="9" fill="#888780" font-family="sans-serif">nailing edge</text>';
+  s += '<text x="'+right+'" y="'+(top+rows*rh+16)+'" font-size="9" fill="#888780" font-family="sans-serif" text-anchor="end">nailing edge</text>';
+  if (inp.rows > rows){
+    s += '<text x="'+(W/2)+'" y="'+(top+rows*rh+16)+'" font-size="8" fill="#888780" font-family="sans-serif" text-anchor="middle">showing '+rows+' of '+inp.rows+' rows</text>';
+  }
+  s += '</svg>';
+  return s;
+}
+
+// ---------- render layout screen ----------
+function renderLayout(){
+  var body = $("layout-body");
+  clear(body);
+  if (!STATE.options.length){
+    body.appendChild(emptyMsg("No layout yet.", "Fill in Setup, then tap Generate layout options."));
+    return;
+  }
+  var inp = STATE.inputs;
+  var opt = STATE.options[STATE.active];
+
+  var card = el("div","card");
+  var lbl = el("p","lbl"); lbl.textContent = "Layout · option "+(STATE.active+1)+" of "+STATE.options.length;
+  card.appendChild(lbl);
+
+  var dw = el("div","diagwrap");
+  dw.innerHTML = drawDiagram(inp, opt, 8); // diagram string is app-generated, no user HTML
+  card.appendChild(dw);
+
+  var bar = el("div","optbar");
+  var who = el("span","who"); who.textContent = opt.name;
+  var tag = el("span","tag"); tag.textContent = inp.oc+"″ o.c. · 1st truss "+inp.offset+"″";
+  bar.appendChild(who); bar.appendChild(tag);
+  card.appendChild(bar);
+
+  var nav = el("div","btnrow"); nav.style.marginTop = "12px";
+  var prev = el("button","btn ghost"); prev.textContent = "◂ prev";
+  var next = el("button","btn ghost"); next.textContent = "next ▸";
+  prev.addEventListener("click", function(){ STATE.active = (STATE.active - 1 + STATE.options.length) % STATE.options.length; renderLayout(); });
+  next.addEventListener("click", function(){ STATE.active = (STATE.active + 1) % STATE.options.length; renderLayout(); });
+  nav.appendChild(prev); nav.appendChild(next);
+  card.appendChild(nav);
+  body.appendChild(card);
+
+  // takeoff
+  var t = computeTakeoff(inp, opt);
+  var to = el("div","takeoff");
+  var tl = el("p","lbl"); tl.textContent = "Takeoff"; to.appendChild(tl);
+  var big = el("div","big"); big.textContent = "~"+t.theoretical+" boards needed · order ~"+t.withBuffer; to.appendChild(big);
+  var sub = el("div","sub"); sub.textContent = t.rows+" rows × "+fmtFt(inp.runIn)+" run · "+inp.buffer+"% pine buffer"; to.appendChild(sub);
+  var chips = el("div","chips");
+  chips.appendChild(chip((t.wastePct)+"% waste", t.wastePct>10));
+  chips.appendChild(chip(t.leftover+" usable boards left", false));
+  if (t.shortEnds) chips.appendChild(chip(t.shortEnds+" short end pieces", false));
+  to.appendChild(chips);
+  body.appendChild(to);
+
+  var useBtn = el("button","btn"); useBtn.textContent = "Use this → cut list";
+  useBtn.addEventListener("click", function(){ switchScreen("s-cuts"); });
+  body.appendChild(useBtn);
+}
+
+// ---------- render cut list ----------
+function renderCuts(){
+  var body = $("cuts-body");
+  clear(body);
+  if (!STATE.options.length){
+    body.appendChild(emptyMsg("No cut list yet.", "Generate a layout first."));
+    return;
+  }
+  var inp = STATE.inputs, opt = STATE.options[STATE.active];
+  var card = el("div","card");
+  var lbl = el("p","lbl"); lbl.textContent = "Cut list · option "+(STATE.active+1); card.appendChild(lbl);
+
+  var list = el("div","cutlist");
+  var letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  opt.rowJoints.forEach(function(j, r){
+    var segs = segLengthsForRow(inp.trusses, j, inp.runIn);
+    var row = el("div","r");
+    var rn = el("span","rn"); rn.textContent = "Row "+rowName(r, letters); row.appendChild(rn);
+    var seg = el("span","seg");
+    var parts = segs.map(function(s){ return fmtFt(s); }).join("  +  ");
+    seg.textContent = parts;
+    var hasShort = segs.some(function(s){ return s < 24; });
+    row.appendChild(seg);
+    if (hasShort){ var f = el("span","flag"); f.textContent = "short end"; seg.appendChild(document.createTextNode(" ")); seg.appendChild(f); }
+    list.appendChild(row);
+  });
+  card.appendChild(list);
+  body.appendChild(card);
+
+  var note = el("p","foot");
+  note.textContent = "Segments are wall→joint→joint→wall. Short ends (<2′) flagged — pick your best pine there.";
+  body.appendChild(note);
+}
+
+function rowName(r, letters){
+  if (r < 26) return letters[r];
+  return letters[Math.floor(r/26)-1] + letters[r%26];
+}
+
+// ---------- print ----------
+function buildPrintArea(){
+  var area = $("print-area");
+  clear(area);
+  if (!STATE.options.length) return;
+  var inp = STATE.inputs, opt = STATE.options[STATE.active];
+
+  var title = el("div","print-title");
+  title.textContent = "EGS Paneling Layout — "+fmtFt(inp.runIn)+" run, "+inp.rows+" rows";
+  area.appendChild(title);
+
+  var dw = el("div","diagwrap");
+  dw.innerHTML = drawDiagram(inp, opt, inp.rows);
+  area.appendChild(dw);
+
+  var t = computeTakeoff(inp, opt);
+  var to = el("div","takeoff");
+  var big = el("div","big"); big.textContent = "~"+t.theoretical+" needed · order ~"+t.withBuffer+" · waste "+t.wastePct+"% · "+t.leftover+" left";
+  to.appendChild(big);
+  area.appendChild(to);
+
+  // reuse cut list markup
+  var card = el("div","card");
+  var list = el("div","cutlist");
+  var letters="ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  opt.rowJoints.forEach(function(j,r){
+    var segs = segLengthsForRow(inp.trusses, j, inp.runIn);
+    var row = el("div","r");
+    var rn = el("span","rn"); rn.textContent = "Row "+rowName(r,letters); row.appendChild(rn);
+    var seg = el("span","seg"); seg.textContent = segs.map(function(s){return fmtFt(s);}).join("  +  ");
+    row.appendChild(seg); list.appendChild(row);
+  });
+  card.appendChild(list);
+  area.appendChild(card);
+}
+
+// ---------- tiny DOM helpers (no innerHTML with class strings) ----------
+function el(tag, cls){ var e = document.createElement(tag); if (cls) e.className = cls; return e; }
+function clear(node){ while (node.firstChild) node.removeChild(node.firstChild); }
+function chip(text, warn){ var c = el("span", warn ? "chip warn" : "chip"); c.textContent = text; return c; }
+function emptyMsg(title, sub){
+  var d = el("div","empty");
+  var b = el("b"); b.textContent = title; d.appendChild(b);
+  d.appendChild(el("br"));
+  d.appendChild(document.createTextNode(sub));
+  return d;
+}
+
+// ---------- screen switching ----------
+function switchScreen(id){
+  var screens = document.querySelectorAll(".screen");
+  for (var i=0;i<screens.length;i++){ screens[i].classList.toggle("active", screens[i].id === id); }
+  var btns = document.querySelectorAll("nav.bottom button");
+  for (var k=0;k<btns.length;k++){ btns[k].classList.toggle("on", btns[k].getAttribute("data-screen") === id); }
+  if (id === "s-layout") renderLayout();
+  if (id === "s-cuts") renderCuts();
+  if (id === "s-print") buildPrintArea();
+  window.scrollTo(0,0);
+}
+
+// ---------- wire up ----------
+document.querySelectorAll("nav.bottom button").forEach(function(b){
+  b.addEventListener("click", function(){ switchScreen(b.getAttribute("data-screen")); });
+});
+
+$("btn-generate").addEventListener("click", function(){
+  var inp = readInputs();
+  if (inp.runIn <= 0 || inp.trusses.length < 2){
+    alert("Check your numbers — need a positive run and at least two trusses.");
+    return;
+  }
+  STATE.inputs = inp;
+  STATE.options = generateLayouts(inp);
+  STATE.active = 0;
+  switchScreen("s-layout");
+});
+
+$("btn-print").addEventListener("click", function(){ buildPrintArea(); window.print(); });
+
+// flooring toggle is present but deferred in v1
+$("mode-floor").addEventListener("click", function(){
+  alert("Flooring mode is coming in the next build. Paneling is live now.");
+});
+$("mode-panel").addEventListener("click", function(){
+  $("mode-panel").classList.add("on"); $("mode-floor").classList.remove("on");
+});
+
+// ============================================================
+//  ===== FLOORING MODULE START =====
+//  (Deferred to v1.1 — this block will hold the flooring engine,
+//   cleanly separable so it can be lifted into a standalone app.)
+//  ===== FLOORING MODULE END =====
+// ============================================================
+</script>
+</body>
+</html>
