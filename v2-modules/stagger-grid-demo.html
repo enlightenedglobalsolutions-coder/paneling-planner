@@ -1,0 +1,242 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Stagger — Draw Area</title>
+<style>
+:root{--ink:#15181D;--panel:#1c2129;--line:#3a434f;--gold:#C9A227;--goldL:#E3C56B;--paper:#f2f2ef;--fill:#C9A227;}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--ink);color:var(--paper);font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.5}
+header{padding:16px 16px 8px}
+h1{font-size:20px;margin:0 0 4px}
+.guide{background:#1e2833;border-left:3px solid var(--gold);border-radius:6px;padding:10px 14px;margin:8px 16px;font-size:14px;color:#cfd6de}
+.bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 16px;align-items:center}
+button{background:#323b47;color:var(--paper);border:1px solid var(--line);border-radius:9px;padding:10px 15px;font-size:15px;cursor:pointer}
+button.on{background:var(--gold);color:var(--ink);font-weight:700;border-color:var(--gold)}
+button.primary{background:var(--gold);color:var(--ink);font-weight:700;border-color:var(--gold)}
+button.ghost{background:transparent}
+.stage{padding:8px 16px}
+svg{width:100%;height:auto;touch-action:none;background:#12151a;border:1px solid var(--line);border-radius:12px;display:block}
+.cell{fill:transparent;stroke:#232a33;stroke-width:0.4}
+.cell.on{fill:var(--fill);fill-opacity:.85}
+.outline{fill:none;stroke:#fff;stroke-width:2.2;stroke-linejoin:round}
+.edgelabel{fill:var(--goldL);font-size:9px;font-family:monospace}
+.status{padding:6px 16px;font-size:14px;color:#aeb6c0}
+.warn{color:#ff9b9b}
+.measbox{padding:8px 16px}
+.measrow{display:flex;align-items:center;gap:10px;margin:6px 0}
+.measrow label{flex:1;font-size:14px;color:#c8cfd8}
+.measrow input{width:90px;background:#161b21;color:#fff;border:1px solid var(--line);border-radius:7px;padding:9px;font-size:16px;text-align:center}
+.sec{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--goldL);margin:16px 16px 4px;font-weight:600}
+</style></head>
+<body>
+<header><h1>Draw the area</h1></header>
+<div class="guide">Drag your finger across the squares to paint the room's shape — any shape. Tap a square again to clear it. When the outline looks right, tap <b>Confirm shape</b> and enter the real length of each side.</div>
+<div class="bar">
+  <span style="font-size:13px;color:#9aa3ad">Grid:</span>
+  <button data-grid="1" class="on">1 ft</button>
+  <button data-grid="0.5">6 in</button>
+  <button data-grid="0.25">3 in</button>
+  <button class="ghost" id="clear" style="margin-left:auto">Clear</button>
+</div>
+<div class="stage"><div id="svgwrap"></div></div>
+<div class="status" id="status">Paint at least one square.</div>
+<div class="bar"><button class="primary" id="confirm">Confirm shape →</button></div>
+<div class="measbox" id="measbox" style="display:none">
+  <div class="sec">Enter each side's real length</div>
+  <div id="measrows"></div>
+  <div class="bar"><button class="primary" id="done">Done</button> <button class="ghost" id="reshape">← Redraw</button></div>
+</div>
+
+<script>
+// ============================================================================
+//  Stagger v2 — grid_shape.js
+//  Finger-paint a room shape on graph paper, then trace its outline so each
+//  side can take a real measurement. Squares are SHAPE ONLY (no assumed size).
+//  Handles ANY orthogonal shape: rect, L, U, T, stepped.
+//
+//  Model:
+//   cells: a Set of "c,r" keys (column,row) the user highlighted.
+//   traceOutline(cells) -> ordered boundary loop of grid vertices, walking the
+//   perimeter clockwise, merging colinear runs into EDGES the user will label.
+//
+//  Pure: no DOM, no canvas. The touch layer just toggles cells in the Set and
+//  calls traceOutline to redraw + list the edges. Testable headless.
+// ============================================================================
+
+function key(c,r){ return c+","+r; }
+function parse(k){ var p=k.split(","); return {c:+p[0], r:+p[1]}; }
+
+// Is a cell filled?
+function has(cells,c,r){ return cells.has(key(c,r)); }
+
+// Trace the outline of a filled region. Returns null if empty or disconnected
+// into >1 region (we require a single contiguous blob for one area).
+// Uses boundary-edge walking: collect every unit edge that borders filled vs
+// empty, then stitch them into a loop, then merge colinear segments.
+function traceOutline(cells){
+  if(!cells || cells.size===0) return { ok:false, error:"empty" };
+
+  // 1. collect boundary unit-edges as directed segments (clockwise around fill)
+  //    grid vertex (c,r) is the top-left corner of cell (c,r).
+  var edges=[]; // each: {x1,y1,x2,y2}
+  cells.forEach(function(k){
+    var p=parse(k), c=p.c, r=p.r;
+    if(!has(cells,c,r-1)) edges.push({x1:c,  y1:r,  x2:c+1,y2:r  }); // top    (L->R)
+    if(!has(cells,c+1,r)) edges.push({x1:c+1,y1:r,  x2:c+1,y2:r+1}); // right  (T->B)
+    if(!has(cells,c,r+1)) edges.push({x1:c+1,y1:r+1,x2:c,  y2:r+1}); // bottom (R->L)
+    if(!has(cells,c-1,r)) edges.push({x1:c,  y1:r+1,x2:c,  y2:r  }); // left   (B->T)
+  });
+  if(!edges.length) return { ok:false, error:"no-boundary" };
+
+  // 2. check single region via flood fill count
+  var regions=countRegions(cells);
+  if(regions>1) return { ok:false, error:"disconnected", regions:regions };
+
+  // 3. stitch edges into one loop by matching endpoints
+  var byStart={};
+  edges.forEach(function(e){ byStart[key(e.x1,e.y1)] = e; });
+  var start=edges[0], loop=[{x:start.x1,y:start.y1}], cur=start, guard=0;
+  while(guard++ < edges.length+2){
+    loop.push({x:cur.x2,y:cur.y2});
+    var nxt=byStart[key(cur.x2,cur.y2)];
+    if(!nxt || (nxt.x2===start.x1 && nxt.y2===start.y1)){ if(nxt) loop.push({x:nxt.x2,y:nxt.y2}); break; }
+    cur=nxt;
+  }
+  // remove duplicate closing point
+  if(loop.length>1){ var f=loop[0], l=loop[loop.length-1]; if(f.x===l.x&&f.y===l.y) loop.pop(); }
+
+  // 4. merge colinear vertices into edges (the sides the user will measure)
+  var merged=mergeColinear(loop);
+
+  return { ok:true, loop:loop, edges:merged, cellCount:cells.size };
+}
+
+// Merge a vertex loop into edges, dropping colinear midpoints.
+function mergeColinear(loop){
+  var pts=loop.slice(), n=pts.length, keep=[];
+  for(var i=0;i<n;i++){
+    var a=pts[(i-1+n)%n], b=pts[i], c=pts[(i+1)%n];
+    var d1x=b.x-a.x, d1y=b.y-a.y, d2x=c.x-b.x, d2y=c.y-b.y;
+    // keep b only if direction changes (a real corner)
+    if(d1x*d2y - d1y*d2x !== 0 || (d1x===0&&d1y===0)) keep.push(b);
+  }
+  var edges=[];
+  for(var j=0;j<keep.length;j++){
+    var p=keep[j], q=keep[(j+1)%keep.length];
+    var lenCells=Math.abs(p.x-q.x)+Math.abs(p.y-q.y);
+    edges.push({ x1:p.x,y1:p.y,x2:q.x,y2:q.y, cells:lenCells,
+                 horiz:p.y===q.y });
+  }
+  return edges;
+}
+
+// Count connected regions (4-neighbour flood) to reject disconnected blobs.
+function countRegions(cells){
+  var seen=new Set(), regions=0;
+  cells.forEach(function(k){
+    if(seen.has(k)) return; regions++;
+    var stack=[k];
+    while(stack.length){
+      var cur=stack.pop(); if(seen.has(cur)) continue; seen.add(cur);
+      var p=parse(cur);
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(function(d){
+        var nk=key(p.c+d[0],p.r+d[1]); if(cells.has(nk)&&!seen.has(nk)) stack.push(nk);
+      });
+    }
+  });
+  return regions;
+}
+
+// Bounding box of the filled cells (in grid units).
+function boundsOf(cells){
+  var minC=Infinity,minR=Infinity,maxC=-Infinity,maxR=-Infinity;
+  cells.forEach(function(k){ var p=parse(k);
+    if(p.c<minC)minC=p.c; if(p.r<minR)minR=p.r; if(p.c>maxC)maxC=p.c; if(p.r>maxR)maxR=p.r; });
+  return { minC:minC,minR:minR,maxC:maxC,maxR:maxR, cols:maxC-minC+1, rows:maxR-minR+1 };
+}
+
+
+
+
+</script>
+<script>
+var COLS=16, ROWS=20, CELL=22;         // grid dimensions in cells + px size
+var cells=new Set();                   // "c,r" painted
+var painting=false, paintMode=true;    // drag paints; mode = add or remove
+
+function svgEl(){ return document.getElementById('svgwrap'); }
+function render(){
+  var w=COLS*CELL, h=ROWS*CELL, s='<svg viewBox="0 0 '+w+' '+h+'" id="grid">';
+  for(var r=0;r<ROWS;r++)for(var c=0;c<COLS;c++){
+    var on=cells.has(c+','+r);
+    s+='<rect class="cell'+(on?' on':'')+'" data-c="'+c+'" data-r="'+r+'" x="'+(c*CELL)+'" y="'+(r*CELL)+'" width="'+CELL+'" height="'+CELL+'"/>';
+  }
+  // outline
+  var res=cells.size?traceOutline(cells):{ok:false};
+  if(res.ok){
+    var pts=res.loop.map(function(p){return (p.x*CELL)+','+(p.y*CELL);}).join(' ');
+    s+='<polygon class="outline" points="'+pts+'"/>';
+    res.edges.forEach(function(e){
+      var mx=(e.x1+e.x2)/2*CELL, my=(e.y1+e.y2)/2*CELL;
+      s+='<text class="edgelabel" x="'+mx+'" y="'+(my-3)+'" text-anchor="middle">'+e.cells+'</text>';
+    });
+  }
+  s+='</svg>';
+  svgEl().innerHTML=s;
+  bindGrid();
+  updateStatus(res);
+}
+function updateStatus(res){
+  var st=document.getElementById('status');
+  if(!cells.size){ st.textContent='Paint at least one square.'; st.className='status'; return; }
+  if(!res.ok){ st.textContent = res.error==='disconnected' ? '⚠ The shape is in separate pieces — connect them into one area.' : 'Keep painting…'; st.className='status warn'; return; }
+  st.textContent='Shape has '+res.edges.length+' sides. '+cells.size+' squares. Looks good? Confirm below.';
+  st.className='status';
+}
+function cellFromEvent(e){
+  var svg=document.getElementById('grid'); if(!svg) return null;
+  var pt=svg.getBoundingClientRect();
+  var t=(e.touches&&e.touches[0])||e;
+  var x=(t.clientX-pt.left)/pt.width*COLS, y=(t.clientY-pt.top)/pt.height*ROWS;
+  var c=Math.floor(x), r=Math.floor(y);
+  if(c<0||r<0||c>=COLS||r>=ROWS) return null;
+  return c+','+r;
+}
+function bindGrid(){
+  var svg=document.getElementById('grid');
+  svg.addEventListener('pointerdown',function(e){
+    var k=cellFromEvent(e); if(!k)return; painting=true;
+    paintMode=!cells.has(k);                 // if empty -> add; if filled -> erase
+    toggle(k,paintMode); e.preventDefault();
+  });
+  svg.addEventListener('pointermove',function(e){
+    if(!painting)return; var k=cellFromEvent(e); if(!k)return; toggle(k,paintMode); e.preventDefault();
+  });
+  window.addEventListener('pointerup',function(){ painting=false; });
+}
+function toggle(k,add){ if(add)cells.add(k); else cells.delete(k); render(); }
+
+document.querySelectorAll('[data-grid]').forEach(function(b){
+  b.onclick=function(){ document.querySelectorAll('[data-grid]').forEach(function(x){x.classList.remove('on');}); b.classList.add('on'); };
+});
+document.getElementById('clear').onclick=function(){ cells.clear(); document.getElementById('measbox').style.display='none'; render(); };
+
+document.getElementById('confirm').onclick=function(){
+  var res=cells.size?traceOutline(cells):{ok:false};
+  if(!res.ok){ alert(res.error==='disconnected'?'The shape is in separate pieces — connect them first.':'Paint a shape first.'); return; }
+  var gs=document.querySelector('[data-grid].on').dataset.grid;
+  var rows=res.edges.map(function(e,i){
+    var approx=(e.cells*gs);
+    return '<div class="measrow"><label>Side '+(i+1)+' ('+(e.horiz?'horizontal':'vertical')+', ~'+approx+' ft)</label><input type="text" placeholder="'+approx+"'"+'" data-edge="'+i+'"></div>';
+  }).join('');
+  document.getElementById('measrows').innerHTML=rows;
+  document.getElementById('measbox').style.display='block';
+  document.getElementById('measbox').scrollIntoView({behavior:'smooth'});
+};
+document.getElementById('reshape')&&(document.getElementById('reshape').onclick=function(){ document.getElementById('measbox').style.display='none'; });
+document.getElementById('done')&&(document.getElementById('done').onclick=function(){
+  var vals=[].map.call(document.querySelectorAll('[data-edge]'),function(i){return i.value||i.placeholder;});
+  alert('Captured '+vals.length+' side measurements:\n'+vals.join('\n')+'\n\n(In the real app these feed the layout engine.)');
+});
+render();
+</script>
+</body></html>

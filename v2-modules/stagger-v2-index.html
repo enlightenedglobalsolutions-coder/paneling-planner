@@ -27,11 +27,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#042C53">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.21-0900';</script>
 <title>EGS Paneling Planner</title>
 <style>
   :root{
@@ -2464,33 +2459,847 @@ $("f-btn-generate").addEventListener("click", FL.generate);
 //  ===== FLOORING MODULE END =====
 // ============================================================
 </script>
+<style>
+#v2ov{display:none;position:fixed;inset:0;background:#0f1216;z-index:900;overflow:auto}
+#v2panel{max-width:680px;margin:0 auto;padding:20px 18px 60px;color:#f2f2ef;font-family:inherit;font-size:17px;line-height:1.5}
+#v2panel h2{font-size:26px;margin:6px 0 4px;color:#fff}
+.v2guide{background:#1e2833;border-left:3px solid #C9A227;border-radius:6px;padding:10px 14px;margin:10px 0 18px;font-size:15px;color:#cfd6de;line-height:1.5}
+.v2card{background:#232a34;border:1px solid #3a434f;border-radius:12px;padding:16px;margin:10px 0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:18px}
+.v2card b{color:#fff;font-size:19px}.v2card span{color:#aeb6c0;font-size:15px}
+.v2card:active{background:#2c3541}
+.v2btn{background:#323b47;color:#f2f2ef;border:1px solid #4a545f;border-radius:9px;padding:12px 18px;margin:8px 6px 8px 0;cursor:pointer;font-size:16px}
+.v2btn:active{background:#3c4652}
+.v2primary{background:#C9A227;color:#15181D;font-weight:700;border-color:#C9A227}
+.v2danger{background:#6b2b2b;border-color:#7a3535;color:#ffdede}
+.v2sm{padding:7px 13px;font-size:14px}
+.v2jobs{position:relative;float:right}
+.v2sec{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:#E3C56B;margin:22px 0 8px;font-weight:600;border-bottom:1px solid #2a333e;padding-bottom:5px}
+#v2panel label{display:block;font-size:15px;color:#c8cfd8;margin:12px 0 5px}
+#v2panel input,#v2panel select{background:#161b21;color:#fff;border:1px solid #3a434f;border-radius:8px;padding:11px;width:100%;font-size:17px}
+.meas{display:flex;gap:10px}.meas-cell{flex:1;display:flex;flex-direction:column;align-items:center}
+.meas-cell input{text-align:center}
+.meas-cell label{font-size:12px;margin-top:5px;color:#9aa3ad;text-transform:uppercase;letter-spacing:.05em}
+.v2len{display:inline-flex;gap:6px;margin:0 16px 8px 0;font-size:17px;align-items:center}
+.v2len input{width:auto;transform:scale(1.3)}
+.v2trail{font-family:monospace;font-size:14px;color:#E3C56B;margin:10px 0;min-height:16px;line-height:1.5}
+.v2warn{color:#ff9b9b;font-size:16px;padding:10px;background:#2a1c1c;border-radius:8px}
+.v2sum{margin-top:18px;padding:14px;background:#232a34;border-radius:10px;font-size:17px}
+.v2t{width:100%;border-collapse:collapse;margin-top:14px;font-size:16px}
+.v2t th{background:#2a333e;color:#E3C56B;padding:10px;font-size:14px;text-transform:uppercase;letter-spacing:.04em}
+.v2t td{border:1px solid #3a434f;padding:11px;text-align:center;color:#f2f2ef}
+.v2best td{background:#26301f;font-weight:600}
+#v2x{margin-bottom:8px}
+.v2preview{margin:14px 0;padding:10px;background:#161b21;border:1px solid #3a434f;border-radius:10px;text-align:center}
+.v2preview svg{max-width:100%;height:auto}
+</style>
 <script>
-/* EGS standard PWA registration — update banner + version stamp */
-(function(){
-  if(!('serviceWorker' in navigator)) return;
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('service-worker.js').then(function(reg){
-      reg.addEventListener('updatefound', function(){
-        var nw=reg.installing; if(!nw) return;
-        nw.addEventListener('statechange', function(){
-          if(nw.state==='installed' && navigator.serviceWorker.controller) egsUpdateBanner();
-        });
-      });
-    }).catch(function(){});
-    var refreshing=false;
-    navigator.serviceWorker.addEventListener('controllerchange', function(){
-      if(refreshing) return; refreshing=true; location.reload();
+// ============================================================
+// Stagger v2 — inside-dimension calculator (pure module)
+// Outside blueprint dims + wall build + finish -> inside wall-to-wall,
+// both directions, with per-side override and a visible math trail.
+// ============================================================
+
+// Wall assembly thickness in inches: framing + interior finish.
+// Sheathing/exterior cladding sits OUTSIDE the outside dimension line on a
+// typical plan (dims to outside of framing), so it is NOT subtracted.
+var FRAMING = { "2x4": 3.5, "2x6": 5.5, "2x8": 7.25, "none": 0 };
+var FINISH  = { "drywall-1/2": 0.5, "drywall-5/8": 0.625, "pine-3/4": 0.75, "none": 0 };
+
+// side spec: {framing:"2x6", finish:"drywall-1/2"}  -> thickness + label
+function wallThickness(side){
+  var f = FRAMING[side.framing];  var fin = FINISH[side.finish];
+  if (f == null || fin == null) return null;
+  return { t: f + fin,
+           label: side.framing + " + " + side.finish + " = " + (f + fin) + "\u2033" };
+}
+
+// One direction (width OR depth):
+//   outsideIn: outside dimension in inches
+//   def: default side spec; overrides: {a:{...}|null, b:{...}|null}
+// Returns inside inches + the human-readable math trail (the echo).
+function insideDim(outsideIn, def, overrides){
+  overrides = overrides || {};
+  var A = wallThickness(overrides.a || def);
+  var B = wallThickness(overrides.b || def);
+  if (A == null || B == null || !(outsideIn > 0)) return null;
+  var inside = outsideIn - A.t - B.t;
+  if (inside <= 0) return null;
+  return {
+    insideIn: inside,
+    trail: fmtIn(outsideIn) + " outside \u2212 (" + A.label + ") \u2212 (" + B.label + ") = "
+           + fmtIn(inside) + " inside",
+    sides: { a: A, b: B }
+  };
+}
+
+// Both directions for an area. width = the RUN (board length direction),
+// depth = ACROSS the rows (board-connect direction). Independent overrides,
+// because the two walls bounding the run are usually different walls than
+// the two bounding the depth.
+function insideArea(outWidthIn, outDepthIn, def, wOv, dOv){
+  var w = insideDim(outWidthIn, def, wOv);
+  var d = insideDim(outDepthIn, def, dOv);
+  if (!w || !d) return null;
+  return { width: w, depth: d };
+}
+
+function fmtIn(x){
+  var f = Math.floor(x/12), r = Math.round((x - f*12)*16)/16;
+  var w = Math.floor(r), fr = r - w, s = "";
+  if (fr > 0.001){ var n = Math.round(fr*16), dd = 16;
+    while (n % 2 === 0 && dd > 1){ n/=2; dd/=2; } s = " " + n + "/" + dd; }
+  return (f>0 ? f + "\u2032-" : "") + w + s + "\u2033";
+}
+
+// ============================================================================
+//  EGS Measurement Widget — shared across Notebuilt + Stagger
+//  Stores INCHES internally (all engines speak inches). The unit mode only
+//  changes how the boxes render and how we read them back. Nothing downstream
+//  ever sees anything but inches.
+//
+//  Imperial: three boxes  ft | in | fraction(typed, e.g. 1/4)
+//  Metric:   two boxes     m  | cm
+//  Unit mode: global default (settings.units) + optional per-field override.
+// ============================================================================
+
+var MEAS_MODE_DEFAULT = "imperial";  // host overrides from settings
+
+// ---- conversions (inch is the canonical unit) ----
+function inchesToImperial(inches){
+  var neg = inches < 0; inches = Math.abs(inches);
+  var totalSix = Math.round(inches * 16);
+  var ft = Math.floor(totalSix / (12*16)); totalSix -= ft*12*16;
+  var inch = Math.floor(totalSix / 16); var fr = totalSix - inch*16;
+  var fracStr = "";
+  if (fr > 0){ var n=fr, d=16; while(n%2===0 && d>1){ n/=2; d/=2; } fracStr = n + "/" + d; }
+  return { ft: (neg?-ft:ft), in: inch, frac: fracStr };
+}
+function imperialToInches(ftStr, inStr, fracStr){
+  var ft = parseFloat(ftStr); if (isNaN(ft)) ft = 0;
+  var inch = parseFloat(inStr); if (isNaN(inch)) inch = 0;
+  var frac = 0;
+  if (fracStr && String(fracStr).trim()){
+    var m = String(fracStr).trim().match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (m){ var dd=+m[2]; if(!dd) return null; frac = (+m[1])/dd; }
+    else if (/^\d*\.?\d+$/.test(fracStr.trim())) { frac = parseFloat(fracStr); } // tolerate a decimal
+    else return null; // unreadable fraction
+  }
+  var sign = ft < 0 ? -1 : 1;
+  return sign * (Math.abs(ft)*12 + inch + frac);
+}
+var MM_PER_INCH = 25.4;
+function inchesToMetric(inches){
+  var mm = inches * MM_PER_INCH;
+  var m = Math.floor(mm / 1000);
+  var cm = Math.round((mm - m*1000) / 10 * 10) / 10;  // cm to 1 decimal
+  if (cm >= 100){ m += 1; cm -= 100; }
+  return { m: m, cm: cm };
+}
+function metricToInches(mStr, cmStr){
+  var m = parseFloat(mStr); if (isNaN(m)) m = 0;
+  var cm = parseFloat(cmStr); if (isNaN(cm)) cm = 0;
+  var mm = m*1000 + cm*10;
+  return mm / MM_PER_INCH;
+}
+
+// ---- read a widget's DOM back to inches (null if unreadable) ----
+function measRead(rootEl){
+  var mode = rootEl.getAttribute("data-mode") || MEAS_MODE_DEFAULT;
+  if (mode === "metric"){
+    var m = rootEl.querySelector('[data-meas-m]').value;
+    var cm = rootEl.querySelector('[data-meas-cm]').value;
+    if (String(m).trim()==="" && String(cm).trim()==="") return null;
+    return metricToInches(m, cm);
+  } else {
+    var ft = rootEl.querySelector('[data-meas-ft]').value;
+    var inch = rootEl.querySelector('[data-meas-in]').value;
+    var frac = rootEl.querySelector('[data-meas-frac]').value;
+    if (String(ft).trim()==="" && String(inch).trim()==="" && String(frac).trim()==="") return null;
+    return imperialToInches(ft, inch, frac);
+  }
+}
+
+// ---- render a widget (returns HTML string). id must be unique on screen. ----
+function measWidget(id, inches, mode){
+  mode = mode || MEAS_MODE_DEFAULT;
+  var box = 'class="input meas-box" inputmode="decimal" autocomplete="off"';
+  if (mode === "metric"){
+    var v = (inches!=null) ? inchesToMetric(inches) : {m:"",cm:""};
+    return '<div class="meas" data-meas="'+id+'" data-mode="metric">'
+      + '<span class="meas-cell"><input '+box+' data-meas-m value="'+v.m+'" placeholder="0"><label>m</label></span>'
+      + '<span class="meas-cell"><input '+box+' data-meas-cm value="'+v.cm+'" placeholder="0"><label>cm</label></span>'
+      + '</div>';
+  } else {
+    var w = (inches!=null) ? inchesToImperial(inches) : {ft:"",in:"",frac:""};
+    return '<div class="meas" data-meas="'+id+'" data-mode="imperial">'
+      + '<span class="meas-cell"><input '+box+' data-meas-ft value="'+w.ft+'" placeholder="0"><label>ft</label></span>'
+      + '<span class="meas-cell"><input '+box+' data-meas-in value="'+w.in+'" placeholder="0"><label>in</label></span>'
+      + '<span class="meas-cell"><input class="input meas-box" autocomplete="off" data-meas-frac value="'+w.frac+'" placeholder="0"><label>frac</label></span>'
+      + '</div>';
+  }
+}
+
+// ---- the echo string (what the value reads as, in the OTHER unit for cross-check) ----
+function measEcho(inches, mode){
+  if (inches==null) return "";
+  mode = mode || MEAS_MODE_DEFAULT;
+  if (mode === "metric"){
+    var w = inchesToImperial(inches);
+    var s = (w.ft?w.ft+"'-":"") + w.in + (w.frac?" "+w.frac:"") + '"';
+    return "= " + s + " imperial";
+  } else {
+    var mm = Math.round(inches*MM_PER_INCH);
+    return "= " + mm + " mm";
+  }
+}
+
+// ============================================================================
+//  Stagger v2 — store.js
+//  Jobs -> Areas -> Layouts, versioned localStorage, migrations, CRUD,
+//  export/import. Schema stores INCHES (engines speak inches). No framework.
+//
+//  Safety contracts (from the spec, non-negotiable):
+//   - schemaVersion on every payload; migrate() chain runs on load, never
+//     destructive; an unknown FUTURE version is read-only, never overwritten.
+//   - site measures (siteWidthIn/siteDepthIn) win over computed dims.
+//   - storage failure (quota / private mode) is reported, never silently lost.
+//   - deletes are explicit calls (UI adds confirm()); nothing deletes on its own.
+// ============================================================================
+
+var STORE_KEY = "stagger.store.v1";
+var SCHEMA_VERSION = 1;
+
+// ---- id + clock (injectable for tests) ----
+function _uid(){
+  return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8);
+}
+function _now(){ return Date.now(); }
+
+// ---- the empty store ----
+function emptyStore(){
+  return { schemaVersion: SCHEMA_VERSION, jobs: [] };
+}
+
+// ---- migrations: index i upgrades vFrom i -> i+1. Append only; never rewrite.
+//      Each must be pure and non-destructive (add fields, don't drop data). ----
+var MIGRATIONS = [
+  // example shape for the future:
+  // function v1_to_v2(s){ s.jobs.forEach(j=>{ if(j.tag===undefined) j.tag=null; }); return s; }
+];
+
+function migrate(store){
+  if(!store || typeof store !== "object") return emptyStore();
+  var v = (typeof store.schemaVersion === "number") ? store.schemaVersion : 0;
+  // Future version we don't understand: DO NOT touch. Caller treats read-only.
+  if(v > SCHEMA_VERSION){ return { __future: true, schemaVersion: v, jobs: store.jobs || [] }; }
+  // Apply forward migrations in order.
+  var s = store;
+  for(var i = v; i < SCHEMA_VERSION; i++){
+    if(typeof MIGRATIONS[i] === "function") s = MIGRATIONS[i](s);
+    s.schemaVersion = i + 1;
+  }
+  if(!Array.isArray(s.jobs)) s.jobs = [];
+  return s;
+}
+
+// ---- load / save with honest failure ----
+function loadStore(storage){
+  storage = storage || _localStorage();
+  var raw;
+  try { raw = storage.getItem(STORE_KEY); }
+  catch(e){ return { store: emptyStore(), error: "read", readOnly:false }; }
+  if(!raw) return { store: emptyStore(), error: null, readOnly:false };
+  var parsed;
+  try { parsed = JSON.parse(raw); }
+  catch(e){ // corrupt payload: keep a backup, start fresh, tell the caller
+    try { storage.setItem(STORE_KEY + ".corrupt." + _now(), raw); } catch(_){}
+    return { store: emptyStore(), error: "corrupt", readOnly:false };
+  }
+  var migrated = migrate(parsed);
+  if(migrated.__future) return { store: migrated, error: "future", readOnly:true };
+  return { store: migrated, error: null, readOnly:false };
+}
+
+function saveStore(store, storage){
+  storage = storage || _localStorage();
+  if(store && store.__future) return { ok:false, error:"readonly-future" }; // never overwrite newer data
+  try {
+    storage.setItem(STORE_KEY, JSON.stringify(store));
+    return { ok:true, error:null };
+  } catch(e){
+    // quota exceeded or private-mode block — report, don't pretend it saved
+    return { ok:false, error: (e && e.name==="QuotaExceededError") ? "quota" : "write" };
+  }
+}
+
+function _localStorage(){
+  try { return window.localStorage; } catch(e){ return _memStub(); }
+}
+function _memStub(){ var m={}; return {
+  getItem:function(k){ return k in m ? m[k] : null; },
+  setItem:function(k,v){ m[k]=String(v); },
+  removeItem:function(k){ delete m[k]; }
+}; }
+
+// ---- job CRUD ----
+function createJob(store, name){
+  var job = { id:_uid(), name:(name||"Untitled job").trim(), createdAt:_now(), updatedAt:_now(), areas:[] };
+  store.jobs.push(job);
+  return job;
+}
+function getJob(store, jobId){ return store.jobs.find(function(j){ return j.id===jobId; }) || null; }
+function renameJob(store, jobId, name){
+  var j=getJob(store,jobId); if(!j) return false;
+  j.name=(name||"").trim()||j.name; j.updatedAt=_now(); return true;
+}
+function deleteJob(store, jobId){
+  var i=store.jobs.findIndex(function(j){ return j.id===jobId; });
+  if(i<0) return false; store.jobs.splice(i,1); return true;
+}
+
+// ---- area CRUD ----
+function defaultDims(){
+  return { entry:"outside", outWidthIn:null, outDepthIn:null,
+           wallDefault:{ framing:"2x6", finish:"drywall-1/2" },
+           overrides:{ width:{a:null,b:null}, depth:{a:null,b:null} },
+           siteWidthIn:null, siteDepthIn:null };
+}
+function createArea(store, jobId, name, mode){
+  var j=getJob(store,jobId); if(!j) return null;
+  var area={ id:_uid(), name:(name||"New area").trim(), mode:(mode||"floor"),
+             dims:defaultDims(), truss:{ oc:24, offsetIn:18 },
+             material:{ faceIn:5.0, lengthsAvailFt:[12,14,16] }, pinned:null };
+  j.areas.push(area); j.updatedAt=_now(); return area;
+}
+function getArea(job, areaId){ return job ? (job.areas.find(function(a){ return a.id===areaId; })||null) : null; }
+function deleteArea(store, jobId, areaId){
+  var j=getJob(store,jobId); if(!j) return false;
+  var i=j.areas.findIndex(function(a){ return a.id===areaId; });
+  if(i<0) return false; j.areas.splice(i,1); j.updatedAt=_now(); return true;
+}
+
+// ---- the effective inside dimension: site measure wins over computed ----
+// computedFn(area) -> {widthIn, depthIn} | null   (slice-1 inside-dims does this)
+function effectiveDims(area, computedFn){
+  var d=area.dims, comp = computedFn ? computedFn(area) : null;
+  var width = (d.siteWidthIn!=null) ? d.siteWidthIn : (comp ? comp.widthIn : null);
+  var depth = (d.siteDepthIn!=null) ? d.siteDepthIn : (comp ? comp.depthIn : null);
+  return {
+    widthIn: width, depthIn: depth,
+    widthSource: (d.siteWidthIn!=null) ? "site" : "computed",
+    depthSource: (d.siteDepthIn!=null) ? "site" : "computed"
+  };
+}
+
+// ---- pin / unpin a chosen layout on an area ----
+function pinLayout(store, jobId, areaId, layout){
+  var j=getJob(store,jobId); var a=getArea(j,areaId); if(!a) return false;
+  a.pinned = { scenarioFt:layout.scenarioFt, rowJoints:layout.rowJoints,
+               label:layout.label, boards:layout.boards, pinnedAt:_now() };
+  j.updatedAt=_now(); return true;
+}
+function unpinLayout(store, jobId, areaId){
+  var j=getJob(store,jobId); var a=getArea(j,areaId); if(!a||!a.pinned) return false;
+  a.pinned=null; j.updatedAt=_now(); return true;
+}
+
+// ---- job totals: sum pinned boards across areas, grouped by stock length ----
+function jobBoardSummary(store, jobId){
+  var j=getJob(store,jobId); if(!j) return null;
+  var byLen={}, pinnedAreas=0, unpinned=0;
+  j.areas.forEach(function(a){
+    if(a.pinned && a.pinned.boards!=null){
+      var ft=a.pinned.scenarioFt;
+      byLen[ft]=(byLen[ft]||0)+a.pinned.boards; pinnedAreas++;
+    } else unpinned++;
+  });
+  return { byLen:byLen, pinnedAreas:pinnedAreas, unpinnedAreas:unpinned,
+           totalBoards:Object.keys(byLen).reduce(function(s,k){ return s+byLen[k]; },0) };
+}
+
+// ---- export / import ----
+function exportAll(store){ return JSON.stringify(store, null, 2); }
+function exportJob(store, jobId){
+  var j=getJob(store,jobId); if(!j) return null;
+  return JSON.stringify({ schemaVersion:store.schemaVersion, jobs:[j] }, null, 2);
+}
+// import merges jobs; a clashing id becomes a new copy (never silently overwrite).
+function importJSON(store, text){
+  var incoming; try { incoming=JSON.parse(text); } catch(e){ return { ok:false, error:"parse" }; }
+  var mig=migrate(incoming);
+  if(mig.__future) return { ok:false, error:"future" };
+  if(!Array.isArray(mig.jobs)) return { ok:false, error:"shape" };
+  var added=0;
+  mig.jobs.forEach(function(j){
+    if(store.jobs.some(function(e){ return e.id===j.id; })){ j.id=_uid(); j.name=j.name+" (imported)"; }
+    store.jobs.push(j); added++;
+  });
+  return { ok:true, added:added };
+}
+
+// ============================================================================
+//  Stagger v2 — spread.js  (Slice 3: board-length spread runner)
+//  For each available stock length, run the EXISTING layout engine and collect
+//  {boards, seams, quality, waste} so the user can compare lengths side by side.
+//  This is a LOOP + TABLE over the real engine — it adds no layout math of its
+//  own. The engine is injected, so this module never duplicates engine logic
+//  and stays testable in isolation.
+//
+//  Honest-failure carried through: if a length can't produce a legal layout,
+//  its row says so instead of showing a fake number. Mixed-length is a separate
+//  opt-in scenario (behind the width-variance warning) — pure lengths here.
+// ============================================================================
+
+// engine contract (what the host passes in):
+//   engine.generate(runIn, acrossIn, boardLenIn, opts) -> {
+//       rowJoints: [[...],...],        // the chosen layout
+//       boards: <number>,             // boards consumed (from the cut sim)
+//       seams: <number>,              // total joints
+//       relaxedRows: <number>,        // rows where a preference was relaxed
+//       wastePct: <number>,           // 0..100
+//       label: <string>,              // e.g. "stagger · B"
+//       ok: <bool>                    // false if no legal layout at this length
+//   }
+//
+// runSpread returns rows sorted best-first (fewest boards, then least waste),
+// each annotated with a human "quality" summary.
+
+function runSpread(engine, params){
+  var runIn = params.runIn, acrossIn = params.acrossIn;
+  var lengthsFt = (params.lengthsAvailFt || []).slice().sort(function(a,b){ return a-b; });
+  if(!(runIn > 0) || !(acrossIn > 0)) return { ok:false, error:"bad-dimensions", rows:[] };
+  if(!lengthsFt.length) return { ok:false, error:"no-lengths", rows:[] };
+
+  var rows = lengthsFt.map(function(ft){
+    var boardIn = ft * 12;
+    var r;
+    try { r = engine.generate(runIn, acrossIn, boardIn, params.opts || {}); }
+    catch(e){ r = { ok:false }; }
+    if(!r || r.ok === false){
+      return { lengthFt:ft, ok:false, boards:null, seams:null, waste:null,
+               quality:"no legal layout at this length", relaxedRows:null, label:null, rowJoints:null };
+    }
+    return {
+      lengthFt: ft, ok:true,
+      boards: r.boards, seams: r.seams,
+      waste: (r.wastePct!=null) ? Math.round(r.wastePct*10)/10 : null,
+      relaxedRows: r.relaxedRows || 0,
+      quality: qualityLabel(r),
+      label: r.label || null,
+      rowJoints: r.rowJoints || null
+    };
+  });
+
+  // rank the legal rows: fewest boards, then least waste, then fewest seams
+  var legal = rows.filter(function(x){ return x.ok; });
+  legal.sort(function(a,b){
+    if(a.boards!==b.boards) return a.boards-b.boards;
+    if((a.waste||0)!==(b.waste||0)) return (a.waste||0)-(b.waste||0);
+    return (a.seams||0)-(b.seams||0);
+  });
+  // mark the best legal length
+  if(legal.length) legal[0].best = true;
+
+  return { ok:true, error:null, rows:rows, ranked:legal,
+           best: legal.length ? legal[0].lengthFt : null };
+}
+
+function qualityLabel(r){
+  if(r.relaxedRows && r.relaxedRows > 0)
+    return r.relaxedRows + " row" + (r.relaxedRows>1?"s":"") + " relaxed";
+  return "clean";
+}
+
+// Build a plain table model the UI can render directly.
+function spreadTable(result){
+  if(!result.ok) return { header:[], rows:[], note: result.error };
+  return {
+    header: ["Length","Boards","Seams","Quality","Waste"],
+    rows: result.rows.map(function(x){
+      if(!x.ok) return { cells:[ x.lengthFt+"'", "\u2014","\u2014", x.quality, "\u2014" ], ok:false };
+      return { cells:[ x.lengthFt+"'", String(x.boards), String(x.seams),
+                       x.quality, (x.waste!=null? x.waste+"%":"\u2014") ],
+               ok:true, best:!!x.best, lengthFt:x.lengthFt };
+    })
+  };
+}
+
+// Whole-job shopping list from pinned per-area choices (pairs with store.jobBoardSummary).
+function shoppingList(byLen){
+  var parts = Object.keys(byLen).map(Number).sort(function(a,b){ return a-b; })
+    .map(function(ft){ return byLen[ft] + "\u00d7 " + ft + "'"; });
+  return parts.join("  +  ");
+}
+
+// ============================================================================
+//  Stagger v2 — lshape.js  (Slice 3b: L-shaped areas as run profiles)
+//  An area is an ordered list of DEPTH BANDS, each with its own run length and
+//  start offset. Rows are generated band by band; within a band every row uses
+//  that band's run. A rectangle is the single-band special case — no separate
+//  code path. Trusses are continuous across the whole area; the seam rules
+//  (adjacent rows never share, two-back share <=1) apply ACROSS band boundaries
+//  exactly as within a band.
+//
+//  The layout ENGINE is injected (same contract as spread.js), so this module
+//  adds no joint math of its own — it slices the area into bands, drives the
+//  engine per band with continuity carried across the seam, and stitches the
+//  rows back into one layout + one cut list.
+// ============================================================================
+
+// shape = { kind:"L"|"rect", bands:[ {depthIn, runIn, runStartIn} , ... ] }
+// For a rect: bands:[ {depthIn:<full>, runIn:<full>, runStartIn:0} ]
+
+// Validate a shape: bands present, positive dims, depths sum sanely.
+function validateShape(shape){
+  if(!shape || !Array.isArray(shape.bands) || !shape.bands.length)
+    return { ok:false, error:"no-bands" };
+  for(var i=0;i<shape.bands.length;i++){
+    var b=shape.bands[i];
+    if(!(b.depthIn>0)) return { ok:false, error:"bad-depth", band:i };
+    if(!(b.runIn>0))   return { ok:false, error:"bad-run", band:i };
+    if(b.runStartIn==null || b.runStartIn<0) return { ok:false, error:"bad-start", band:i };
+  }
+  return { ok:true };
+}
+
+// Total depth and the max run (width of the bounding box) — handy for the UI.
+function shapeExtent(shape){
+  var depth=0, maxRun=0, minStart=Infinity, maxEnd=0;
+  shape.bands.forEach(function(b){
+    depth+=b.depthIn;
+    if(b.runIn>maxRun) maxRun=b.runIn;
+    if(b.runStartIn<minStart) minStart=b.runStartIn;
+    if(b.runStartIn+b.runIn>maxEnd) maxEnd=b.runStartIn+b.runIn;
+  });
+  return { totalDepthIn:depth, maxRunIn:maxRun, boundingRunIn:maxEnd-(minStart===Infinity?0:minStart) };
+}
+
+// Given a face width, how many rows fall in each band (rows run across depth).
+function bandRowCounts(shape, faceIn){
+  return shape.bands.map(function(b){ return Math.max(1, Math.round(b.depthIn/faceIn)); });
+}
+
+// Generate a full L-shaped layout. engine.generate(runIn, acrossIn, boardIn, opts)
+// is called PER BAND, but we pass continuity so seam rules hold across the seam:
+// opts.prevRows = the last two rows' joints from the previous band.
+function generateLShape(engine, shape, faceIn, boardIn, opts){
+  var v=validateShape(shape); if(!v.ok) return { ok:false, error:v.error };
+  opts = opts || {};
+  var counts=bandRowCounts(shape, faceIn);
+  var allRows=[];        // stitched rowJoints across every band
+  var bandMeta=[];       // per-band {runIn, rows, startRow}
+  var carry=[];          // last up-to-2 rows from previous band (for continuity)
+
+  for(var i=0;i<shape.bands.length;i++){
+    var b=shape.bands[i];
+    var bandAcross=counts[i]*faceIn;
+    var r;
+    try {
+      r = engine.generate(b.runIn, bandAcross, boardIn,
+            Object.assign({}, opts, { prevRows: carry.slice(-2), runStartIn:b.runStartIn }));
+    } catch(e){ r={ ok:false }; }
+    if(!r || r.ok===false) return { ok:false, error:"band-illegal", band:i };
+
+    var rows = r.rowJoints || [];
+    bandMeta.push({ runIn:b.runIn, runStartIn:b.runStartIn, rows:rows.length, startRow:allRows.length });
+    for(var k=0;k<rows.length;k++) allRows.push({ joints:rows[k], runIn:b.runIn, runStartIn:b.runStartIn, band:i });
+    carry = rows;   // hand this band's rows to the next as continuity
+  }
+
+  return {
+    ok:true,
+    rows: allRows,                       // [{joints, runIn, runStartIn, band}]
+    bands: bandMeta,
+    totalRows: allRows.length,
+    extent: shapeExtent(shape)
+  };
+}
+
+// Independent audit: verify seam rules hold across the WHOLE stitched layout,
+// including band boundaries. Reads only the output (never the engine's flags).
+function auditLShape(layout){
+  if(!layout.ok) return { ok:false };
+  var rows=layout.rows.map(function(r){ return r.joints||[]; });
+  function shared(a,b){ var n=0; a.forEach(function(x){ if(b.indexOf(x)>=0)n++; }); return n; }
+  var adjShare=0, twoBackOver=0, boundaryChecks=0;
+  for(var r=0;r<rows.length;r++){
+    if(r>0 && rows[r].length && rows[r-1].length){
+      if(shared(rows[r],rows[r-1])>0) adjShare++;
+      if(layout.rows[r].band!==layout.rows[r-1].band) boundaryChecks++;
+    }
+    if(r>1 && rows[r].length && rows[r-2].length && shared(rows[r],rows[r-2])>1) twoBackOver++;
+  }
+  return { ok: adjShare===0 && twoBackOver===0,
+           adjShare:adjShare, twoBackOver:twoBackOver, boundaryChecks:boundaryChecks };
+}
+
+// Cut list rolls up across bands: each row labeled with its band + run.
+function lshapeCutList(layout, trussesForRun){
+  // trussesForRun(runIn, runStartIn) -> [truss positions] ; segLen derived by host.
+  return layout.rows.map(function(r, idx){
+    return { row: idx+1, band: r.band, runIn: r.runIn, runStartIn: r.runStartIn, joints: r.joints };
+  });
+}
+
+// ============================================================================
+//  Stagger v2 — shape_preview.js
+//  Draw an L-shape (or rect) as a labeled SVG so the user can SEE the area
+//  they're entering. Outline + a dimension label on every edge. Pure: takes a
+//  shape, returns an SVG string. No DOM, no engine — testable in isolation.
+//
+//  shape = { kind:"rect"|"L", bands:[ {depthIn, runIn, runStartIn} ] }
+//  The L is drawn as the union of its depth-bands stacked top to bottom, each
+//  band starting at its runStartIn. Bands run left->right (the board run);
+//  depth stacks downward. This matches lshape.js's run-profile model exactly.
+// ============================================================================
+
+function fmtFtIn(inches){
+  if(inches==null||isNaN(inches)) return "?";
+  var neg=inches<0; inches=Math.abs(inches);
+  var ft=Math.floor(inches/12), rem=inches-ft*12;
+  var six=Math.round(rem*16), w=Math.floor(six/16), fr=six-w*16;
+  if(w===12){ft++;w=0;}
+  var s=""; if(fr>0){var n=fr,d=16;while(n%2===0&&d>1){n/=2;d/=2;}s=" "+n+"/"+d;}
+  var out=(neg?"-":"");
+  if(ft>0) out+=ft+"'"+(w||fr? "-"+w+s+'"':""); else out+=w+s+'"';
+  return out;
+}
+
+// Build the polygon outline (in inch-space) for the shape's bands.
+// Returns { points:[[x,y]...], edges:[{x1,y1,x2,y2,len,side}], w, h }.
+function outlineOf(shape){
+  if(!shape || !Array.isArray(shape.bands) || !shape.bands.length) return null;
+  var bands=shape.bands;
+  // y offsets: each band stacks below the previous
+  var y=0, segs=[];
+  bands.forEach(function(b){
+    segs.push({ x0:b.runStartIn||0, x1:(b.runStartIn||0)+b.runIn, y0:y, y1:y+b.depthIn, depthIn:b.depthIn, runIn:b.runIn });
+    y+=b.depthIn;
+  });
+  // For a clean L of 2 bands we can trace the union outline. General approach:
+  // build the boundary by walking the right side down then the left side up.
+  // Compute bounding box.
+  var minX=Math.min.apply(null,segs.map(function(s){return s.x0;}));
+  var maxX=Math.max.apply(null,segs.map(function(s){return s.x1;}));
+  var maxY=y;
+  // Right edge profile (top->bottom) and left edge profile (bottom->top).
+  var pts=[];
+  // top-left corner
+  pts.push([segs[0].x0, 0]);
+  // top edge to top-right
+  pts.push([segs[0].x1, 0]);
+  // walk down the right side, stepping in/out as run changes
+  for(var i=0;i<segs.length;i++){
+    pts.push([segs[i].x1, segs[i].y1]);            // down this band's right edge
+    if(i+1<segs.length && segs[i+1].x1!==segs[i].x1)
+      pts.push([segs[i+1].x1, segs[i].y1]);        // step to next band's right edge
+  }
+  // bottom edge to bottom-left
+  pts.push([segs[segs.length-1].x0, maxY]);
+  // walk up the left side
+  for(var j=segs.length-1;j>=0;j--){
+    pts.push([segs[j].x0, segs[j].y0]);
+    if(j-1>=0 && segs[j-1].x0!==segs[j].x0)
+      pts.push([segs[j-1].x0, segs[j].y0]);
+  }
+  // derive edges with lengths
+  var edges=[];
+  for(var k=0;k<pts.length;k++){
+    var a=pts[k], b=pts[(k+1)%pts.length];
+    var len=Math.abs(a[0]-b[0])||Math.abs(a[1]-b[1]);
+    if(len>0.5) edges.push({ x1:a[0],y1:a[1],x2:b[0],y2:b[1], len:len,
+      horiz:a[1]===b[1] });
+  }
+  return { points:pts, edges:edges, minX:minX, maxX:maxX, maxY:maxY,
+           w:maxX-minX, h:maxY };
+}
+
+// Render the outline to an SVG string, scaled to fit `boxPx`, with a dimension
+// label centered on each edge.
+function shapePreviewSVG(shape, boxPx){
+  boxPx = boxPx || 300;
+  var o=outlineOf(shape);
+  if(!o || !(o.w>0) || !(o.h>0))
+    return '<svg viewBox="0 0 '+boxPx+' '+(boxPx*0.6)+'" xmlns="http://www.w3.org/2000/svg"><text x="'+(boxPx/2)+'" y="'+(boxPx*0.3)+'" text-anchor="middle" fill="#9aa3ad" font-size="14">enter dimensions to see the shape</text></svg>';
+  var pad=46, W=boxPx, H=boxPx*(o.h/o.w);
+  if(H>boxPx*1.3){ H=boxPx*1.3; }
+  var innerW=W-pad*2, innerH=H-pad*2;
+  var sc=Math.min(innerW/o.w, innerH/o.h);
+  function X(x){ return pad + (x-o.minX)*sc; }
+  function Y(y){ return pad + y*sc; }
+  var poly=o.points.map(function(p){ return X(p[0])+","+Y(p[1]); }).join(" ");
+  var labels=o.edges.map(function(e){
+    var mx=(X(e.x1)+X(e.x2))/2, my=(Y(e.y1)+Y(e.y2))/2;
+    var dx=e.horiz?0:(e.x1<=o.minX+0.5?-6:10), dy=e.horiz?-6:0;
+    var anchor=e.horiz?"middle":(e.x1<=o.minX+0.5?"end":"start");
+    return '<text x="'+(mx+dx)+'" y="'+(my+dy)+'" text-anchor="'+anchor+'" fill="#E3C56B" font-size="13" font-family="monospace">'+fmtFtIn(e.len)+'</text>';
+  }).join("");
+  return '<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg">'
+    +'<polygon points="'+poly+'" fill="#26301f" stroke="#C9A227" stroke-width="2"/>'
+    +labels+'</svg>';
+}
+
+/* ===== STAGGER V2 — adapter + Jobs UI (injected; modules above are verbatim proven copies) ===== */
+var V2FACE = 5.0;
+function v2CutSim(rowJoints, runIn, boardIn){
+  var boards=0, used=0, offcuts=[];
+  rowJoints.forEach(function(joints){
+    var pts=[0].concat(joints.map(function(t){return t*1;})).concat([1]);
+    // joints are truss indices in engine space; approximate segment lengths by even spacing when unknown
+    var segs = joints.length+1, segLen = runIn/segs, lens=[]; for(var i=0;i<segs;i++) lens.push(segLen);
+    lens.forEach(function(L){
+      var oi=offcuts.findIndex(function(o){return o>=L;});
+      if(oi>=0){ offcuts[oi]-=L; used+=L; }
+      else { boards++; used+=L; var rem=boardIn-L; if(rem>1) offcuts.push(rem); }
     });
   });
-  function egsUpdateBanner(){
-    if(document.getElementById('egs-update')) return;
-    var b=document.createElement('div'); b.id='egs-update';
-    b.style.cssText='position:fixed;left:12px;right:12px;bottom:76px;z-index:99999;background:#185FA5;color:#fff;font:600 15px -apple-system,Segoe UI,Roboto,sans-serif;padding:13px 16px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);display:flex;align-items:center;gap:12px';
-    b.innerHTML='<span style="flex:1">A new version is ready.</span><button id="egs-upd-btn" style="background:#fff;color:#185FA5;border:0;border-radius:8px;padding:9px 15px;font:inherit;font-weight:700;cursor:pointer">Refresh</button>';
-    document.body.appendChild(b);
-    document.getElementById('egs-upd-btn').onclick=function(){ location.reload(); };
+  var bought=boards*boardIn;
+  return { boards:boards, wastePct: bought>0 ? Math.max(0,(bought-used)/bought*100) : 0 };
+}
+function v2Engine(area){
+  return { generate:function(runIn, acrossIn, boardIn, opts){
+    var rows=Math.max(1,Math.round(acrossIn/(area.material.faceIn||V2FACE)));
+    var tr=buildTrusses(runIn, area.truss.offsetIn, area.truss.oc);
+    var old=LONGEST_STOCK; LONGEST_STOCK=boardIn;
+    var res; try{ res=generateOptions(tr, runIn, boardIn, rows); } finally{ LONGEST_STOCK=old; }
+    var opts_=(res&&res.options)||res||[];
+    var list=Array.isArray(opts_)?opts_:(opts_.built||[]);
+    if(!list.length) return {ok:false};
+    var best=list[0];
+    if(best.stats && best.stats.illegal>0) return {ok:false};
+    var sim=v2CutSim(best.rowJoints, runIn, boardIn);
+    var seams=best.rowJoints.reduce(function(s,r){return s+r.length;},0);
+    return { ok:true, rowJoints:best.rowJoints, boards:sim.boards, seams:seams,
+             relaxedRows:best.relaxed||0, wastePct:sim.wastePct, label:best.label||"stagger" };
+  }};
+}
+var V2 = { store:null, ro:false, jobId:null, areaId:null, units: localStorage.getItem("stagger.units")||"imperial" };
+function v2Load(){ var r=loadStore(); V2.store=r.store; V2.ro=r.readOnly; }
+function v2Save(){ var r=saveStore(V2.store); if(!r.ok) alert("Save failed: "+r.error+" — export your jobs as backup."); }
+function v2MW(id,inches){ return measWidget(id,inches,V2.units); }
+function v2Read(id){ var el=document.querySelector('[data-meas="'+id+'"]'); return el?measRead(el):null; }
+function v2Open(){ v2Load(); var ov=document.getElementById('v2ov'); ov.style.display='block'; v2Jobs(); }
+function v2Close(){ document.getElementById('v2ov').style.display='none'; }
+function v2Jobs(){
+  var el=document.getElementById('v2body'); V2.jobId=null;
+  el.innerHTML='<h2>Jobs</h2>'+'<div class="v2guide">Each job is one project (like “Steeves”). Tap a job to open it, or make a new one. Your jobs stay saved even while you estimate others.</div>'+(V2.ro?'<p class="v2warn">Newer data version — read-only. Export only.</p>':'')+
+    V2.store.jobs.map(function(j){ return '<div class="v2card" data-v2job="'+j.id+'"><b>'+esc(j.name)+'</b><span>'+j.areas.length+' area(s)</span></div>'; }).join('')+
+    '<button class="v2btn" id="v2new">+ New job</button> <button class="v2btn" id="v2exp">Export all</button> <button class="v2btn" id="v2imp">Import</button>';
+  el.querySelectorAll('[data-v2job]').forEach(function(c){ c.onclick=function(){ v2Job(c.dataset.v2job); }; });
+  document.getElementById('v2new').onclick=function(){ var n=prompt('Job name?'); if(!n)return; createJob(V2.store,n); v2Save(); v2Jobs(); };
+  document.getElementById('v2exp').onclick=function(){ v2Download('stagger-jobs.json', exportAll(V2.store)); };
+  document.getElementById('v2imp').onclick=function(){ var t=prompt('Paste exported JSON:'); if(!t)return; var r=importJSON(V2.store,t); alert(r.ok?('Imported '+r.added+' job(s)'):('Import failed: '+r.error)); if(r.ok){v2Save();v2Jobs();} };
+}
+function v2Job(id){
+  var j=getJob(V2.store,id); if(!j) return v2Jobs(); V2.jobId=id;
+  var sum=jobBoardSummary(V2.store,id);
+  var el=document.getElementById('v2body');
+  el.innerHTML='<button class="v2btn" id="v2back">&larr; Jobs</button><h2>'+esc(j.name)+'</h2>'+'<div class="v2guide">A job holds one or more areas (rooms or ceilings). Add an area, then open it to enter dimensions and get board counts. Pinned areas add up to the job total below.</div>'+
+    j.areas.map(function(a){ return '<div class="v2card" data-v2area="'+a.id+'"><b>'+esc(a.name)+'</b><span>'+(a.pinned?('pinned: '+a.pinned.boards+' bd @ '+a.pinned.scenarioFt+"'"):'not pinned')+'</span></div>'; }).join('')+
+    '<button class="v2btn" id="v2na">+ New area</button> <button class="v2btn v2danger" id="v2dj">Delete job</button>'+
+    '<div class="v2sum"><b>Job boards:</b> '+(sum.totalBoards? shoppingList(sum.byLen) : 'none pinned yet')+(sum.unpinnedAreas?(' · '+sum.unpinnedAreas+' area(s) unpinned'):'')+'</div>';
+  document.getElementById('v2back').onclick=v2Jobs;
+  el.querySelectorAll('[data-v2area]').forEach(function(c){ c.onclick=function(){ v2Area(c.dataset.v2area); }; });
+  document.getElementById('v2na').onclick=function(){ var n=prompt('Area name?'); if(!n)return; createArea(V2.store,id,n,'panel'); v2Save(); v2Job(id); };
+  document.getElementById('v2dj').onclick=function(){ if(confirm('Delete job "'+j.name+'" and all its areas? This can\u2019t be undone.')){ deleteJob(V2.store,id); v2Save(); v2Jobs(); } };
+}
+function v2Area(aid){
+  var j=getJob(V2.store,V2.jobId), a=getArea(j,aid); if(!a) return v2Job(V2.jobId); V2.areaId=aid;
+  var d=a.dims, el=document.getElementById('v2body');
+  var Ls=a.shape&&a.shape.kind==='L';
+  el.innerHTML='<button class="v2btn" id="v2back">&larr; '+esc(j.name)+'</button><h2>'+esc(a.name)+'</h2>'+'<div class="v2guide">Enter the room’s outside dimensions and wall build — the app works out the inside size. Pick which board lengths you can buy, then tap Generate to compare how many boards each length needs.</div>'+
+   '<div class="v2sec">Outside dimensions <button class="v2btn v2sm" id="v2units">'+(V2.units==='imperial'?'ft/in':'metric')+' \u21c4</button></div>'+
+   '<label>Width (run)</label>'+v2MW('ow',d.outWidthIn)+'<label>Depth (across rows)</label>'+v2MW('od',d.outDepthIn)+
+   '<div class="v2sec">Walls</div><label>Default framing</label><select id="v2fr">'+Object.keys(FRAMING).map(function(k){return '<option'+(d.wallDefault.framing===k?' selected':'')+'>'+k+'</option>';}).join('')+'</select>'+
+   '<label>Default finish</label><select id="v2fi">'+Object.keys(FINISH).map(function(k){return '<option'+(d.wallDefault.finish===k?' selected':'')+'>'+k+'</option>';}).join('')+'</select>'+
+   '<div id="v2trail" class="v2trail"></div>'+
+   '<div class="v2sec">Site measure (always wins)</div><label>Width</label>'+v2MW('sw',d.siteWidthIn)+'<label>Depth</label>'+v2MW('sd',d.siteDepthIn)+
+   '<div class="v2sec">Shape</div><label><input type="checkbox" id="v2L" '+(Ls?'checked':'')+'> This area is L-shaped</label>'+
+   '<div id="v2Lb" style="display:'+(Ls?'block':'none')+'">'+
+     '<div class="v2guide">An L is two rectangles stacked. <b>Band 1</b> is the narrower strip on top; <b>Band 2</b> is the full-width part below. <b>Depth</b> = how far the boards travel across the rows; <b>Run</b> = the length along the boards. The picture updates as you type — check it matches your floor.</div>'+
+     '<label>Band 1 (top strip) — depth</label>'+v2MW('b1d',Ls?a.shape.bands[0].depthIn:null)+'<label>Band 1 — run (length)</label>'+v2MW('b1r',Ls?a.shape.bands[0].runIn:null)+
+     '<label>Band 2 (full width) — depth</label>'+v2MW('b2d',Ls?a.shape.bands[1].depthIn:null)+'<label>Band 2 — run (length)</label>'+v2MW('b2r',Ls?a.shape.bands[1].runIn:null)+
+     '<div id="v2preview" class="v2preview"></div>'+
+   '</div>'+
+   '<div class="v2sec">Trusses & material</div><label>OC (in)</label><input id="v2oc" value="'+a.truss.oc+'"><label>Offset (in)</label><input id="v2off" value="'+a.truss.offsetIn+'"><label>Face (in)</label><input id="v2face" value="'+a.material.faceIn+'">'+
+   '<label>Lengths</label><div>'+[8,10,12,14,16].map(function(f){return '<label class="v2len"><input type="checkbox" data-v2len="'+f+'" '+(a.material.lengthsAvailFt.indexOf(f)>=0?'checked':'')+'>'+f+"'</label>";}).join('')+'</div>'+
+   '<button class="v2btn v2primary" id="v2gen">Generate spread</button> <button class="v2btn v2danger" id="v2da">Delete area</button>'+
+   '<div id="v2out"></div>';
+  document.getElementById('v2back').onclick=function(){ v2SaveArea(a); v2Job(V2.jobId); };
+  document.getElementById('v2units').onclick=function(){ V2.units=(V2.units==='imperial'?'metric':'imperial'); localStorage.setItem('stagger.units',V2.units); v2SaveArea(a); v2Area(aid); };
+  function v2DrawPreview(){
+    var box=document.getElementById('v2preview'); if(!box) return;
+    var b1d=v2Read('b1d'), b1r=v2Read('b1r'), b2d=v2Read('b2d'), b2r=v2Read('b2r');
+    if(b1d&&b1r&&b2d&&b2r){
+      var shape={kind:'L',bands:[{depthIn:b1d,runIn:b1r,runStartIn:0},{depthIn:b2d,runIn:b2r,runStartIn:0}]};
+      box.innerHTML=shapePreviewSVG(shape, 320);
+    } else { box.innerHTML='<div class="v2trail">Enter all four measurements to see the shape.</div>'; }
   }
-})();
+  document.getElementById('v2L').onchange=function(){ var on=this.checked; document.getElementById('v2Lb').style.display=on?'block':'none'; if(on) v2DrawPreview(); };
+  ['b1d','b1r','b2d','b2r'].forEach(function(id){ var el=document.querySelector('[data-meas="'+id+'"]'); if(el) el.querySelectorAll('input').forEach(function(i){ var prev=i.oninput; i.oninput=function(){ if(prev)prev(); v2DrawPreview(); }; }); });
+  if(Ls) v2DrawPreview();
+  document.getElementById('v2da').onclick=function(){ if(confirm('Delete area "'+a.name+'"?')){ deleteArea(V2.store,V2.jobId,aid); v2Save(); v2Job(V2.jobId); } };
+  function trail(){ var w=v2Read('ow'), dd=v2Read('od');
+    var def={framing:document.getElementById('v2fr').value, finish:document.getElementById('v2fi').value};
+    var t=document.getElementById('v2trail'); if(w&&dd){ var r=insideArea(w,dd,def); t.textContent = r? (r.width.trail+'  |  '+r.depth.trail) : 'walls thicker than the room \u2014 check dims'; } else t.textContent=''; }
+  el.querySelectorAll('.meas input').forEach(function(i){ i.oninput=trail; });
+  document.getElementById('v2fr').onchange=trail; document.getElementById('v2fi').onchange=trail; trail();
+  document.getElementById('v2gen').onclick=function(){ v2SaveArea(a); v2Gen(a); };
+}
+function v2SaveArea(a){
+  a.dims.outWidthIn=v2Read('ow'); a.dims.outDepthIn=v2Read('od');
+  a.dims.siteWidthIn=v2Read('sw'); a.dims.siteDepthIn=v2Read('sd');
+  a.dims.wallDefault={framing:document.getElementById('v2fr').value, finish:document.getElementById('v2fi').value};
+  a.truss.oc=parseFloat(document.getElementById('v2oc').value)||24; a.truss.offsetIn=parseFloat(document.getElementById('v2off').value)||0;
+  a.material.faceIn=parseFloat(document.getElementById('v2face').value)||5;
+  a.material.lengthsAvailFt=[].map.call(document.querySelectorAll('[data-v2len]'),function(c){return c.checked?+c.dataset.v2len:null;}).filter(Boolean);
+  if(document.getElementById('v2L').checked){
+    a.shape={kind:'L',bands:[{depthIn:v2Read('b1d'),runIn:v2Read('b1r'),runStartIn:0},{depthIn:v2Read('b2d'),runIn:v2Read('b2r'),runStartIn:0}]};
+  } else a.shape=null;
+  var jj=getJob(V2.store,V2.jobId); if(jj) jj.updatedAt=Date.now();
+  v2Save();
+}
+function v2Gen(a){
+  var eff=effectiveDims(a,function(ar){ var r=insideArea(ar.dims.outWidthIn,ar.dims.outDepthIn,ar.dims.wallDefault); return r?{widthIn:r.width.insideIn,depthIn:r.depth.insideIn}:null; });
+  var out=document.getElementById('v2out');
+  if(a.shape&&a.shape.kind==='L'){
+    var v=validateShape(a.shape); if(!v.ok){ out.innerHTML='<p class="v2warn">L-shape: '+v.error+'</p>'; return; }
+    var rows=a.material.lengthsAvailFt.map(function(ft){
+      var g=generateLShape(v2Engine(a),a.shape,a.material.faceIn,ft*12,{});
+      if(!g.ok) return {lengthFt:ft,ok:false,quality:'no legal layout'};
+      var aud=auditLShape(g); var b=0,seams=0;
+      g.bands.forEach(function(bm,i){ var band=a.shape.bands[i]; var rj=g.rows.filter(function(r){return r.band===i;}).map(function(r){return r.joints;}); var s=v2CutSim(rj,band.runIn,ft*12); b+=s.boards; rj.forEach(function(r){seams+=r.length;}); });
+      return {lengthFt:ft,ok:true,boards:b,seams:seams,quality:aud.ok?'clean (audited across boundary)':'AUDIT FLAG',waste:null,rowJoints:g.rows.map(function(r){return r.joints;})};
+    });
+    v2Table(out,rows,a,eff); return;
+  }
+  if(eff.widthIn==null||eff.depthIn==null){ out.innerHTML='<p class="v2warn">Need dimensions (outside + walls, or site measures).</p>'; return; }
+  var res=runSpread(v2Engine(a),{runIn:eff.widthIn,acrossIn:eff.depthIn,lengthsAvailFt:a.material.lengthsAvailFt});
+  if(!res.ok){ out.innerHTML='<p class="v2warn">'+res.error+'</p>'; return; }
+  out.innerHTML='<p class="v2trail">Using width: '+eff.widthSource+' · depth: '+eff.depthSource+'</p>';
+  v2Table(out,res.rows,a,eff,true);
+}
+function v2Table(out,rows,a,eff,append){
+  var t=spreadTable({ok:true,rows:rows});
+  var h='<table class="v2t"><tr>'+t.header.map(function(x){return '<th>'+x+'</th>';}).join('')+'<th></th></tr>'+
+    t.rows.map(function(r,i){ return '<tr class="'+(r.best?'v2best':'')+'">'+r.cells.map(function(c){return '<td>'+c+'</td>';}).join('')+'<td>'+(r.ok?'<button class="v2btn v2sm" data-v2pin="'+i+'">Pin</button>':'')+'</td></tr>'; }).join('')+'</table>';
+  if(append) out.innerHTML+=h; else out.innerHTML=h;
+  out.querySelectorAll('[data-v2pin]').forEach(function(b){ b.onclick=function(){
+    var r=rows[+b.dataset.v2pin];
+    pinLayout(V2.store,V2.jobId,V2.areaId,{scenarioFt:r.lengthFt,rowJoints:r.rowJoints||[],label:r.label||('stagger '+r.lengthFt+"'"),boards:r.boards});
+    v2Save(); alert('Pinned '+r.lengthFt+"' \u2014 "+r.boards+' boards for this area.');
+  };});
+}
+function v2Download(name,text){ var bl=new Blob([text],{type:'application/json'}); var u=URL.createObjectURL(bl); var A=document.createElement('a'); A.href=u; A.download=name; A.click(); setTimeout(function(){URL.revokeObjectURL(u);},2000); }
+document.addEventListener('DOMContentLoaded',function(){
+  var hdr=document.querySelector('header')||document.body;
+  var btn=document.createElement('button'); btn.textContent='Jobs'; btn.className='v2btn v2jobs'; btn.onclick=v2Open; hdr.appendChild(btn);
+  var ov=document.createElement('div'); ov.id='v2ov';
+  ov.innerHTML='<div id="v2panel"><button class="v2btn" id="v2x">\u2715 Close</button><div id="v2body"></div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('v2x').onclick=v2Close;
+});
+
 </script>
 </body>
 </html>
