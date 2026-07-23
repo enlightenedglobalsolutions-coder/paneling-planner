@@ -1,0 +1,284 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>EGS Command Center</title>
+<!-- ==========================================================================
+     EGS standard PWA wiring — paste ONCE into every app's <head>.
+     Registers the service worker and shows a gentle "update ready" banner when
+     a new version has been deployed. Change nothing per app.
+     ========================================================================== -->
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#15181D">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script>
+window.EGS_VERSION = '2026.07.23-0957';   // egs-deploy.sh stamps this — shown in-app so you can eyeball the running version
+(function(){
+  if(!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('./service-worker.js').then(function(reg){
+      // A new worker finished installing while the app is already open -> offer refresh.
+      reg.addEventListener('updatefound', function(){
+        var nw = reg.installing;
+        if(!nw) return;
+        nw.addEventListener('statechange', function(){
+          if(nw.state === 'installed' && navigator.serviceWorker.controller){
+            egsUpdateBanner();
+          }
+        });
+      });
+    }).catch(function(){});
+    // Reload once the new worker takes control (after the user taps refresh).
+    var refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function(){
+      if(refreshing) return; refreshing = true; location.reload();
+    });
+  });
+  function egsUpdateBanner(){
+    if(document.getElementById('egs-update')) return;
+    var b = document.createElement('div');
+    b.id = 'egs-update';
+    b.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:#C9A227;color:#15181D;font:600 15px -apple-system,Segoe UI,Roboto,sans-serif;padding:13px 16px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);display:flex;align-items:center;gap:12px';
+    b.innerHTML = '<span style="flex:1">A new version is ready.</span><button id="egs-upd-btn" style="background:#15181D;color:#fff;border:0;border-radius:8px;padding:9px 15px;font:inherit;cursor:pointer">Refresh</button>';
+    document.body.appendChild(b);
+    document.getElementById('egs-upd-btn').onclick = function(){
+      if(navigator.serviceWorker.controller) navigator.serviceWorker.ready.then(function(reg){ if(reg.waiting) reg.waiting.postMessage('skipWaiting'); location.reload(); });
+      else location.reload();
+    };
+  }
+})();
+</script>
+<style>
+:root{
+  --ink:#12151a;--panel:#1c2129;--panel2:#232a34;--line:#3a434f;
+  --gold:#C9A227;--goldL:#E3C56B;--paper:#f2f2ef;--dim:#9aa3ad;
+  --blue:#5B9BD9;--sage:#8FA382;--rust:#E8956B;--ok:#6fbf73;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--ink);color:var(--paper);font-family:-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.55;font-size:16px;padding-bottom:60px}
+header{padding:22px 18px 10px;position:sticky;top:0;background:linear-gradient(180deg,var(--ink) 70%,transparent);z-index:5}
+.eyebrow{color:var(--gold);font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:700}
+h1{font-family:Georgia,serif;font-size:27px;margin:2px 0 0}
+.date{color:var(--dim);font-size:14px;margin-top:2px}
+.wrap{padding:0 18px}
+.now{background:linear-gradient(135deg,#2a2410,#1c2129);border:1px solid var(--gold);border-radius:14px;padding:16px;margin:14px 0}
+.now .lab{color:var(--goldL);font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:6px}
+.now textarea{width:100%;background:transparent;border:0;color:var(--paper);font:inherit;resize:none;outline:none;min-height:48px}
+.sec{margin:22px 0 8px;display:flex;align-items:center;gap:10px}
+.sec h2{font-family:Georgia,serif;font-size:20px;margin:0}
+.sec .rule{flex:1;height:1px;background:var(--line)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;margin:9px 0;cursor:pointer;transition:transform .05s}
+.card:active{transform:scale(.99)}
+.card h3{margin:0 0 3px;font-size:17px;display:flex;align-items:center;gap:8px}
+.card .meta{color:var(--dim);font-size:13px}
+.badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:700;letter-spacing:.03em}
+.b-live{background:#1c3320;color:var(--ok);border:1px solid var(--ok)}
+.b-dev{background:#33301c;color:var(--goldL);border:1px solid var(--gold)}
+.b-block{background:#33211c;color:var(--rust);border:1px solid var(--rust)}
+.b-hold{background:#2a2a33;color:var(--dim);border:1px solid var(--line)}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.pill-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.pill{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:8px 15px;font-size:14px;cursor:pointer}
+.pill.on{background:var(--gold);color:var(--ink);font-weight:700;border-color:var(--gold)}
+.capture{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;margin:10px 0}
+.capture textarea{width:100%;background:var(--ink);border:1px solid var(--line);border-radius:9px;color:var(--paper);font:inherit;padding:11px;resize:vertical;min-height:60px;outline:none}
+.capture button{background:var(--gold);color:var(--ink);border:0;border-radius:9px;padding:10px 18px;font:600 15px inherit;margin-top:8px;cursor:pointer}
+.inbox-item{background:var(--panel2);border-radius:9px;padding:10px 12px;margin:7px 0;font-size:14px;display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.inbox-item button{background:transparent;border:0;color:var(--dim);font-size:18px;cursor:pointer;flex:0 0 auto}
+.settle{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px}
+.settle label{display:flex;gap:10px;align-items:flex-start;padding:8px 0;font-size:15px;cursor:pointer;border-bottom:1px solid #262d37}
+.settle label:last-child{border:0}
+.settle input{margin-top:3px;transform:scale(1.3);accent-color:var(--gold)}
+.settle .done{color:var(--dim);text-decoration:line-through}
+.muted{color:var(--dim);font-size:13px;line-height:1.6}
+.principle{background:linear-gradient(135deg,#1c2129,#191d24);border-left:3px solid var(--gold);border-radius:8px;padding:12px 15px;margin:10px 0;font-size:14px;color:#cfd6de}
+.principle b{color:var(--goldL)}
+.link-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.link{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 13px;font-size:13px;color:var(--paper);text-decoration:none;cursor:pointer}
+.tabbar{position:fixed;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--line);display:flex;z-index:10}
+.tabbar button{flex:1;background:0;border:0;color:var(--dim);font:600 11px inherit;padding:9px 4px 12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px}
+.tabbar button.on{color:var(--gold)}
+.tabbar svg{width:22px;height:22px}
+.view{display:none}.view.on{display:block}
+.addbtn{background:var(--panel2);border:1px dashed var(--line);border-radius:11px;padding:12px;width:100%;color:var(--dim);font:inherit;cursor:pointer;margin:6px 0}
+.editrow{display:flex;gap:8px;margin:8px 0}
+.editrow input{flex:1;background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--paper);font:inherit;padding:9px;outline:none}
+.editrow select{background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--paper);font:inherit;padding:9px}
+.ver{text-align:center;color:#556;font-size:11px;padding:14px}
+</style></head>
+<body>
+<header>
+  <div class="eyebrow">EGS Command Center</div>
+  <h1 id="greeting">Good day, Edwin</h1>
+  <div class="date" id="today"></div>
+</header>
+
+<!-- ===================== HOME ===================== -->
+<div class="view on" id="v-home">
+<div class="wrap">
+  <div class="now">
+    <div class="lab">◆ The one thing right now</div>
+    <textarea id="focus" placeholder="What's the single most important thing today? (saved automatically)"></textarea>
+  </div>
+
+  <div class="principle"><b>The wind principle:</b> you don't have to stop changing direction — that's where your ideas come from. These systems just <i>hold</i> while you move, so nothing blows away. If it's not written in its one place, it doesn't exist. Your memory is never the system.</div>
+
+  <div class="sec"><h2>Life domains</h2><div class="rule"></div></div>
+  <div id="domains"></div>
+</div>
+</div>
+
+<!-- ===================== EGS ===================== -->
+<div class="view" id="v-egs">
+<div class="wrap">
+  <div class="sec"><h2>EGS — the portfolio</h2><div class="rule"></div></div>
+  <div class="muted">Your source of truth for every app. Tap any app to cycle its status. This is the registry — if an app isn't here, it doesn't exist.</div>
+  <div id="apps"></div>
+  <button class="addbtn" onclick="addApp()">+ add app</button>
+
+  <div class="sec"><h2>EGS anchors</h2><div class="rule"></div></div>
+  <div class="muted">The foundation everything stands on — where to look when you forget how something works.</div>
+  <div class="link-row">
+    <span class="link">platform/ — the SW standard</span>
+    <span class="link">components/ — reusable modules</span>
+    <span class="link">docs/EGS-DECISIONS.md — the why</span>
+    <span class="link">egs-deploy.sh — how to ship</span>
+  </div>
+</div>
+</div>
+
+<!-- ===================== CAPTURE ===================== -->
+<div class="view" id="v-capture">
+<div class="wrap">
+  <div class="sec"><h2>Capture</h2><div class="rule"></div></div>
+  <div class="principle">Catch it fast, sort it later. The enemy isn't forgetting — it's the idea evaporating before you catch it. Dump here messy; the weekly settle sorts it.</div>
+  <div class="pill-row" id="capture-tags"></div>
+  <div class="capture">
+    <textarea id="cap-text" placeholder="Idea, task, thought, anything..."></textarea>
+    <button onclick="addCapture()">Capture it →</button>
+  </div>
+  <div class="sec"><h2>Inbox</h2><div class="rule"></div></div>
+  <div id="inbox"></div>
+</div>
+</div>
+
+<!-- ===================== SETTLE ===================== -->
+<div class="view" id="v-settle">
+<div class="wrap">
+  <div class="sec"><h2>Weekly settle</h2><div class="rule"></div></div>
+  <div class="principle">Not daily discipline — you won't sustain that, and that's fine. Once a week, 20 minutes, the wind briefly lands and you tidy. Low bar, repeatable. That's all organization ever needs to be.</div>
+  <div class="settle" id="settle"></div>
+  <button class="addbtn" onclick="resetSettle()">↺ reset for a new week</button>
+</div>
+</div>
+
+<div class="tabbar">
+  <button class="on" data-v="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</button>
+  <button data-v="egs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9.2"/><path d="M8.2 16V8l7.6 8V8"/></svg>EGS</button>
+  <button data-v="capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>Capture</button>
+  <button data-v="settle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12l5 5L20 6"/></svg>Settle</button>
+</div>
+<div class="ver" id="ver"></div>
+
+<script>
+// ---------- storage helpers (in-memory + localStorage) ----------
+function load(k,d){ try{ var v=localStorage.getItem('egscc.'+k); return v?JSON.parse(v):d; }catch(e){ return d; } }
+function save(k,v){ try{ localStorage.setItem('egscc.'+k, JSON.stringify(v)); }catch(e){} }
+
+// ---------- seed data ----------
+var DOMAINS = load('domains', [
+  {name:'EGS — App Business', icon:'◆', note:'Main priority. Tap the EGS tab.', color:'--gold', tab:'egs'},
+  {name:'Family', icon:'♥', note:'The reason for all of it.', color:'--rust'},
+  {name:'Trading', icon:'▲', note:'Max journal · disciplined, HTF-aligned.', color:'--blue'},
+  {name:'Home & Jobs', icon:'⌂', note:'Carpentry work, the house, real-world builds.', color:'--sage'},
+  {name:'Health & Self', icon:'✦', note:'The engine behind everything else.', color:'--goldL'}
+]);
+var APPS = load('apps', [
+  {name:'Notebuilt', status:'live', note:'Self-updating SW proven. You use it daily.'},
+  {name:'WFD', status:'live', note:'wfdegs.ca · has ship-blockers to clear'},
+  {name:'Stagger', status:'dev', note:'v2 modules built (79 tests) · assembly in progress'},
+  {name:'Kept', status:'dev', note:'Memorial app · storage name stays "punchlist"'},
+  {name:'Sorted', status:'dev', note:'Private media organizer'},
+  {name:'Roadside', status:'hold', note:'UNRELEASED until Alberta lawyer review'}
+]);
+var STATUS_CYCLE=['dev','live','block','hold'];
+var STATUS_LABEL={live:'LIVE',dev:'IN DEV',block:'BLOCKED',hold:'ON HOLD'};
+var STATUS_CLASS={live:'b-live',dev:'b-dev',block:'b-block',hold:'b-hold'};
+var INBOX = load('inbox', []);
+var CAPTAGS=['idea','EGS','family','trading','home','todo'];
+var capTag = load('captag','idea');
+var SETTLE = load('settle', [
+  {t:'Empty the Capture inbox — sort each item to where it lives',d:false},
+  {t:'Update the EGS registry (any app status change?)',d:false},
+  {t:'Set the ONE thing for next week (Home tab)',d:false},
+  {t:'Quick money glance — trading journal / income',d:false},
+  {t:'One family thing planned this week?',d:false},
+  {t:'Any file saved this week that isn\u2019t in its home yet?',d:false}
+]);
+
+// ---------- render ----------
+function renderDomains(){
+  document.getElementById('domains').innerHTML = DOMAINS.map(function(d,i){
+    return '<div class="card" onclick="tapDomain('+i+')"><h3><span class="dot" style="background:var('+d.color+')"></span>'+d.icon+' '+esc(d.name)+'</h3><div class="meta">'+esc(d.note)+'</div></div>';
+  }).join('');
+}
+function renderApps(){
+  document.getElementById('apps').innerHTML = APPS.map(function(a,i){
+    return '<div class="card" onclick="cycleApp('+i+')"><h3>'+esc(a.name)+' <span class="badge '+STATUS_CLASS[a.status]+'">'+STATUS_LABEL[a.status]+'</span></h3><div class="meta">'+esc(a.note)+'</div></div>';
+  }).join('');
+}
+function renderInbox(){
+  var el=document.getElementById('inbox');
+  if(!INBOX.length){ el.innerHTML='<div class="muted">Inbox empty. Nice — the wind\u2019s settled.</div>'; return; }
+  el.innerHTML = INBOX.map(function(it,i){
+    return '<div class="inbox-item"><span><b style="color:var(--goldL)">'+esc(it.tag)+'</b> · '+esc(it.text)+'</span><button onclick="delCapture('+i+')">\u2715</button></div>';
+  }).join('');
+}
+function renderTags(){
+  document.getElementById('capture-tags').innerHTML = CAPTAGS.map(function(t){
+    return '<span class="pill'+(t===capTag?' on':'')+'" onclick="setTag(\''+t+'\')">'+t+'</span>';
+  }).join('');
+}
+function renderSettle(){
+  document.getElementById('settle').innerHTML = SETTLE.map(function(s,i){
+    return '<label><input type="checkbox" '+(s.d?'checked':'')+' onchange="toggleSettle('+i+')"><span class="'+(s.d?'done':'')+'">'+esc(s.t)+'</span></label>';
+  }).join('');
+}
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+// ---------- actions ----------
+function tapDomain(i){ var d=DOMAINS[i]; if(d.tab){ switchView(d.tab); } else { var n=prompt('Update note for '+d.name+':', d.note); if(n!==null){ d.note=n; save('domains',DOMAINS); renderDomains(); } } }
+function cycleApp(i){ var a=APPS[i]; a.status=STATUS_CYCLE[(STATUS_CYCLE.indexOf(a.status)+1)%STATUS_CYCLE.length]; save('apps',APPS); renderApps(); }
+function addApp(){ var n=prompt('App name?'); if(!n)return; APPS.push({name:n,status:'dev',note:'new'}); save('apps',APPS); renderApps(); }
+function setTag(t){ capTag=t; save('captag',t); renderTags(); }
+function addCapture(){ var t=document.getElementById('cap-text').value.trim(); if(!t)return; INBOX.unshift({text:t,tag:capTag,at:Date.now()}); save('inbox',INBOX); document.getElementById('cap-text').value=''; renderInbox(); }
+function delCapture(i){ INBOX.splice(i,1); save('inbox',INBOX); renderInbox(); }
+function toggleSettle(i){ SETTLE[i].d=!SETTLE[i].d; save('settle',SETTLE); renderSettle(); }
+function resetSettle(){ SETTLE.forEach(function(s){s.d=false;}); save('settle',SETTLE); renderSettle(); }
+
+// focus note autosave
+var focusEl=document.getElementById('focus');
+focusEl.value=load('focus','');
+focusEl.addEventListener('input',function(){ save('focus',focusEl.value); });
+
+// tabs
+function switchView(v){
+  document.querySelectorAll('.view').forEach(function(el){ el.classList.remove('on'); });
+  document.getElementById('v-'+v).classList.add('on');
+  document.querySelectorAll('.tabbar button').forEach(function(b){ b.classList.toggle('on', b.dataset.v===v); });
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('.tabbar button').forEach(function(b){ b.onclick=function(){ switchView(b.dataset.v); }; });
+
+// date + greeting
+(function(){
+  var d=new Date(), h=d.getHours();
+  document.getElementById('greeting').textContent=(h<12?'Good morning':h<18?'Good afternoon':'Good evening')+', Edwin';
+  document.getElementById('today').textContent=d.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  document.getElementById('ver').textContent='EGS Command Center · v'+(window.EGS_VERSION||'1.0')+' · your external brain';
+})();
+
+renderDomains(); renderApps(); renderInbox(); renderTags(); renderSettle();
+</script>
+</body></html>
