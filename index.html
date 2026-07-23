@@ -31,7 +31,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.22-1700';</script>
+<script>window.EGS_VERSION = '2026.07.21-1029';</script>
 <title>EGS Paneling Planner</title>
 <style>
   :root{
@@ -399,6 +399,9 @@ button {font:inherit;background:var(--panel2);color:var(--paper);border:1px soli
 #jobsOverlay button.ghost {background:transparent}
 #jobsOverlay button.grow {flex:1}
 #jobsOverlay button:disabled {opacity:.4}
+#jobsOverlay .estctrls{flex-wrap:wrap;}
+#jobsOverlay .estlab{min-width:0;}
+#jobsOverlay .estin{width:100%;}
 /* ===== STAGGER JOBS OVERLAY CSS END ===== */
 </style>
 </head>
@@ -4050,8 +4053,11 @@ function stgReadSetup(){
   function inchesOf(id, fallback){
     var eln=document.getElementById(id); if(!eln) return fallback;
     var raw=(eln.value||'').trim(); if(!raw) return fallback;
-    // reuse the prototype's ft-in-frac parser via a single "ft" field read
-    var v=imperialToInches(raw,'','');
+    // Use the BASE app's own parser: it honours each field's data-meas unit.
+    // i-face and i-offset are INCH fields — parsing them as feet turned a 5"
+    // face into 5' and killed every layout.
+    var v=0;
+    try{ v=measIn(id); }catch(e){ v=0; }
     if(!(v>0)){ var n=parseFloat(raw); v=isFinite(n)?n:fallback; }
     return v>0?v:fallback;
   }
