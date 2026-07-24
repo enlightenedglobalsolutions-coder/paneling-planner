@@ -1,0 +1,7 @@
+# Archived variants — kept on disk, never shipped to Pages.
+_old/
+
+# Backups written by egs-deploy.sh
+index.html.bak.*
+
+.DS_Store
