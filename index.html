@@ -403,6 +403,18 @@ button {font:inherit;background:var(--panel2);color:var(--paper);border:1px soli
 #jobsOverlay .estlab{min-width:0;}
 #jobsOverlay .estin{width:100%;}
 /* ===== STAGGER JOBS OVERLAY CSS END ===== */
+/* pinned board length — the carpenter's choice, distinct from the engine's "best" */
+.stgTbl tr.pinned{background:rgba(190,150,70,.22);}
+.stgTbl tr.pinned td{font-weight:700;}
+button.stgPin{min-width:30px;min-height:30px;border:0;border-radius:8px;background:transparent;
+  color:#c9b487;font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:4px 6px;}
+button.stgPin:hover{background:rgba(190,150,70,.18);}
+button.stgPin.on{background:rgba(190,150,70,.30);}
+.stgPinNote{padding:4px 2px 0;font-size:12px;color:#c9b487;}
+.stgShopNote{padding:4px 2px 0;font-size:12px;opacity:.75;}
+.oldstore{margin:14px 2px 0;padding:10px 12px;border:1px solid rgba(190,150,70,.35);
+  border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.oldstore .lab{flex:1;font-size:13px;opacity:.85;}
 </style>
 </head>
 <body>
@@ -2671,7 +2683,7 @@ $("f-btn-generate").addEventListener("click", FL.generate);
     b.style.cssText='position:fixed;left:12px;right:12px;bottom:76px;z-index:99999;background:#185FA5;color:#fff;font:600 15px -apple-system,Segoe UI,Roboto,sans-serif;padding:13px 16px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);display:flex;align-items:center;gap:12px';
     b.innerHTML='<span style="flex:1">A new version is ready.</span><button id="egs-upd-btn" style="background:#fff;color:#185FA5;border:0;border-radius:8px;padding:9px 15px;font:inherit;font-weight:700;cursor:pointer">Refresh</button>';
     document.body.appendChild(b);
-    document.getElementById('egs-upd-btn').onclick=function(){ location.reload(); };
+    document.getElementById('egs-upd-btn').addEventListener('click', function(){ location.reload(); });
   }
 })();
 </script>
@@ -2689,9 +2701,32 @@ $("f-btn-generate").addEventListener("click", FL.generate);
   <p class="guide">Each job holds its own areas, totals and materials.</p>
   <div class="arealist" id="jobList"></div>
   <div class="actions"><button class="gold grow" id="newJob">+ New job</button></div>
+  <div class="oldstore" id="oldStoreNote" hidden>
+    <span class="lab">The old storage copy of your jobs is still on this device.</span>
+    <button class="ghost" id="clearOldStore">Remove old copy</button>
+  </div>
 </section>
 
 <!-- ============ VIEW 0 · JOB / AREAS ============ -->
+<section class="view" id="viewMigrate">
+  <header><p class="eyebrow">Storage</p><h1>Bring your jobs across</h1></header>
+  <p class="guide">Your jobs are saved in the older storage. Nothing has been changed
+    yet &mdash; this is only a look at what was found. Download a backup first if you like,
+    then bring them across. The old copy is kept either way.</p>
+  <div class="arealist" id="migList"></div>
+  <div class="jobtotal" id="migTotal"></div>
+  <p class="guide" id="migMsg" hidden></p>
+  <div class="actions">
+    <button class="ghost grow" id="migBackup">Download backup JSON</button>
+  </div>
+  <div class="actions">
+    <button class="gold grow" id="migGo">Bring my jobs across</button>
+    <button class="ghost" id="migSkip">Not yet</button>
+  </div>
+  <div class="actions">
+    <button class="gold grow" id="migDone" hidden>Continue to my jobs</button>
+  </div>
+</section>
 <section class="view" id="viewJob">
   <div class="topbar"><button class="ghost" id="jobsBack">← Jobs</button><span class="name" id="jobHeading"></span></div>
   <header><p class="eyebrow">Job</p><h1 id="jobTitle">Your areas</h1></header>
@@ -3422,7 +3457,7 @@ function px2u(px){ return px/(CELL*zoom); }
 
 /* ---------- view switching ---------- */
 function showView(id){
-  ['viewJobs','viewJob','viewPick','viewDraw','viewMeasure'].forEach(function(v){
+  ['viewJobs','viewJob','viewPick','viewDraw','viewMeasure','viewMigrate'].forEach(function(v){
     document.getElementById(v).classList.toggle('on', v===id);
   });
 }
@@ -3603,8 +3638,8 @@ document.getElementById('toMeasure').addEventListener('click', function(){
   var restore=null;
   if(editingIdx>=0 && JOB.areas[editingIdx]){
     var a=JOB.areas[editingIdx];
-    restore={ name:a.name, material:a.material };
-    if(a.inches && a.inches.length===res.edges.length){ restore.inches=a.inches; restore.mode=a.mode; restore.runOverride=a.runOverride; }
+    restore={ name:a.name, material:a.materialType };
+    if(a.inches && a.inches.length===res.edges.length){ restore.inches=a.inches; restore.mode=a.unitsMode; restore.runOverride=a.runOverride; }
   }
   buildMeasure(res, restore);
   showView('viewMeasure');
@@ -3776,82 +3811,443 @@ document.getElementById('mdiag').addEventListener('click', function(e){
 document.getElementById('backToDraw').addEventListener('click', function(){ showView('viewDraw'); requestAnimationFrame(renderCanvas); });
 document.getElementById('done').addEventListener('click', saveCurrentArea);
 
-/* ---------- persistence · keyed job collection (schema v1) ----------
-   stagger.jobs.v1 = { schema:1, currentId:"job_x", jobs:{ "job_x":{id,name,created,updated,areas,wastePct,boxCov} } }
-   Structured as a collection so a job list can drop in later with no migration. */
-var STORE_KEY='stagger.jobs.v1', SCHEMA=1;
-var STG_MIGRATIONS = [ /* index i upgrades v(i) -> v(i+1); append on each real bump */ ];
-function stgMigrate(st){
-  if(!st || typeof st!=='object') return null;
-  var v=(typeof st.schema==='number')?st.schema:0;
-  if(v>SCHEMA){ st.__future=true; return st; }
-  for(var i=v;i<SCHEMA;i++){ if(typeof STG_MIGRATIONS[i]==='function') st=STG_MIGRATIONS[i](st); st.schema=i+1; }
-  return st;
+/* ---- store.js (inlined; tested standalone by test_store.js, 26/26) ---- */
+var StaggerStore = (function(){
+// ============================================================================
+//  Stagger v2 — store.js
+//  Jobs -> Areas -> Layouts, versioned localStorage, migrations, CRUD,
+//  export/import. Schema stores INCHES (engines speak inches). No framework.
+//
+//  Safety contracts (from the spec, non-negotiable):
+//   - schemaVersion on every payload; migrate() chain runs on load, never
+//     destructive; an unknown FUTURE version is read-only, never overwritten.
+//   - site measures (siteWidthIn/siteDepthIn) win over computed dims.
+//   - storage failure (quota / private mode) is reported, never silently lost.
+//   - deletes are explicit calls (UI adds confirm()); nothing deletes on its own.
+// ============================================================================
+
+var STORE_KEY = "stagger.store.v1";
+var SCHEMA_VERSION = 2;
+
+// ---- id + clock (injectable for tests) ----
+function _uid(){
+  return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8);
+}
+function _now(){ return Date.now(); }
+
+// ---- the empty store ----
+function emptyStore(){
+  return { schemaVersion: SCHEMA_VERSION, jobs: [], currentJobId: null };
+}
+
+// ---- v2 area/job defaults --------------------------------------------------
+// v2 absorbed the drawn-geometry model that used to live under stagger.jobs.v1.
+// Two field names collided across the two models and were renamed on the way in:
+//   material (string "Hardwood"/"__exclude")  -> materialType   [store's own
+//              `material` stays the {faceIn,lengthsAvailFt} stock object]
+//   mode     (units "imperial"/"metric")      -> unitsMode      [store's own
+//              `mode` stays the "floor"/"panel" work mode]
+// Anything that renames a field must also add it here, or migrated records and
+// freshly-created ones drift apart.
+function geometryDefaults(){
+  return { materialType:null, unitsMode:"imperial", excluded:false,
+           rects:null, edges:null, inches:null, sqft:null,
+           engineInput:null, runOverride:null };
+}
+function applyAreaV2(a){
+  var d=geometryDefaults();
+  Object.keys(d).forEach(function(k){ if(a[k]===undefined) a[k]=d[k]; });
+  if(a.pinned===undefined) a.pinned=null;
+  if(typeof a.id!=="string") a.id=_uid();
+  return a;
+}
+
+// ---- migrations: index i upgrades vFrom i -> i+1. Append only; never rewrite.
+//      Each must be pure and non-destructive (add fields, don't drop data). ----
+var MIGRATIONS = [
+  // [0] v0 -> v1 : the original shape; nothing to add.
+  null,
+  // [1] v1 -> v2 : geometry fields on areas, waste/box on jobs, currentJobId on
+  //     the root. Additive only — no existing field is renamed or dropped here.
+  function v1_to_v2(s){
+    if(s.currentJobId===undefined) s.currentJobId=null;
+    (s.jobs||[]).forEach(function(j){
+      if(j.wastePct===undefined) j.wastePct=10;
+      if(j.boxCov===undefined) j.boxCov="";
+      if(!Array.isArray(j.areas)) j.areas=[];
+      j.areas.forEach(applyAreaV2);
+    });
+    return s;
+  }
+];
+
+function migrate(store){
+  if(!store || typeof store !== "object") return emptyStore();
+  var v = (typeof store.schemaVersion === "number") ? store.schemaVersion : 0;
+  // Future version we don't understand: DO NOT touch. Caller treats read-only.
+  if(v > SCHEMA_VERSION){ return { __future: true, schemaVersion: v, jobs: store.jobs || [] }; }
+  // Apply forward migrations in order.
+  var s = store;
+  for(var i = v; i < SCHEMA_VERSION; i++){
+    if(typeof MIGRATIONS[i] === "function") s = MIGRATIONS[i](s);
+    s.schemaVersion = i + 1;
+  }
+  if(!Array.isArray(s.jobs)) s.jobs = [];
+  return s;
+}
+
+// ---- load / save with honest failure ----
+function loadStore(storage){
+  storage = storage || _localStorage();
+  var raw;
+  try { raw = storage.getItem(STORE_KEY); }
+  catch(e){ return { store: emptyStore(), error: "read", readOnly:false }; }
+  if(!raw) return { store: emptyStore(), error: null, readOnly:false };
+  var parsed;
+  try { parsed = JSON.parse(raw); }
+  catch(e){ // corrupt payload: keep a backup, start fresh, tell the caller
+    try { storage.setItem(STORE_KEY + ".corrupt." + _now(), raw); } catch(_){}
+    return { store: emptyStore(), error: "corrupt", readOnly:false };
+  }
+  var migrated = migrate(parsed);
+  if(migrated.__future) return { store: migrated, error: "future", readOnly:true };
+  return { store: migrated, error: null, readOnly:false };
+}
+
+function saveStore(store, storage){
+  storage = storage || _localStorage();
+  if(store && store.__future) return { ok:false, error:"readonly-future" }; // never overwrite newer data
+  try {
+    storage.setItem(STORE_KEY, JSON.stringify(store));
+    return { ok:true, error:null };
+  } catch(e){
+    // quota exceeded or private-mode block — report, don't pretend it saved
+    return { ok:false, error: (e && e.name==="QuotaExceededError") ? "quota" : "write" };
+  }
+}
+
+function _localStorage(){
+  try { return window.localStorage; } catch(e){ return _memStub(); }
+}
+function _memStub(){ var m={}; return {
+  getItem:function(k){ return k in m ? m[k] : null; },
+  setItem:function(k,v){ m[k]=String(v); },
+  removeItem:function(k){ delete m[k]; }
+}; }
+
+// ---- job CRUD ----
+function createJob(store, name){
+  var job = { id:_uid(), name:(name||"Untitled job").trim(), createdAt:_now(), updatedAt:_now(),
+              areas:[], wastePct:10, boxCov:"" };
+  store.jobs.push(job);
+  return job;
+}
+function getJob(store, jobId){ return store.jobs.find(function(j){ return j.id===jobId; }) || null; }
+function renameJob(store, jobId, name){
+  var j=getJob(store,jobId); if(!j) return false;
+  j.name=(name||"").trim()||j.name; j.updatedAt=_now(); return true;
+}
+function deleteJob(store, jobId){
+  var i=store.jobs.findIndex(function(j){ return j.id===jobId; });
+  if(i<0) return false; store.jobs.splice(i,1); return true;
+}
+
+// ---- area CRUD ----
+function defaultDims(){
+  return { entry:"outside", outWidthIn:null, outDepthIn:null,
+           wallDefault:{ framing:"2x6", finish:"drywall-1/2" },
+           overrides:{ width:{a:null,b:null}, depth:{a:null,b:null} },
+           siteWidthIn:null, siteDepthIn:null };
+}
+function createArea(store, jobId, name, mode){
+  var j=getJob(store,jobId); if(!j) return null;
+  var area={ id:_uid(), name:(name||"New area").trim(), mode:(mode||"floor"),
+             dims:defaultDims(), truss:{ oc:24, offsetIn:18 },
+             material:{ faceIn:5.0, lengthsAvailFt:[12,14,16] }, pinned:null };
+  applyAreaV2(area);
+  j.areas.push(area); j.updatedAt=_now(); return area;
+}
+function getArea(job, areaId){ return job ? (job.areas.find(function(a){ return a.id===areaId; })||null) : null; }
+function deleteArea(store, jobId, areaId){
+  var j=getJob(store,jobId); if(!j) return false;
+  var i=j.areas.findIndex(function(a){ return a.id===areaId; });
+  if(i<0) return false; j.areas.splice(i,1); j.updatedAt=_now(); return true;
+}
+
+// ---- the effective inside dimension: site measure wins over computed ----
+// computedFn(area) -> {widthIn, depthIn} | null   (slice-1 inside-dims does this)
+function effectiveDims(area, computedFn){
+  var d=area.dims, comp = computedFn ? computedFn(area) : null;
+  var width = (d.siteWidthIn!=null) ? d.siteWidthIn : (comp ? comp.widthIn : null);
+  var depth = (d.siteDepthIn!=null) ? d.siteDepthIn : (comp ? comp.depthIn : null);
+  return {
+    widthIn: width, depthIn: depth,
+    widthSource: (d.siteWidthIn!=null) ? "site" : "computed",
+    depthSource: (d.siteDepthIn!=null) ? "site" : "computed"
+  };
+}
+
+// ---- pin / unpin a chosen layout on an area ----
+function pinLayout(store, jobId, areaId, layout){
+  var j=getJob(store,jobId); var a=getArea(j,areaId); if(!a) return false;
+  a.pinned = { scenarioFt:layout.scenarioFt, rowJoints:layout.rowJoints,
+               label:layout.label, boards:layout.boards, pinnedAt:_now() };
+  j.updatedAt=_now(); return true;
+}
+function unpinLayout(store, jobId, areaId){
+  var j=getJob(store,jobId); var a=getArea(j,areaId); if(!a||!a.pinned) return false;
+  a.pinned=null; j.updatedAt=_now(); return true;
+}
+
+// ---- job totals: sum pinned boards across areas, grouped by stock length ----
+function jobBoardSummary(store, jobId){
+  var j=getJob(store,jobId); if(!j) return null;
+  var byLen={}, pinnedAreas=0, unpinned=0, excluded=0;
+  j.areas.forEach(function(a){
+    // An excluded area is deliberately out of the job — it can never be pinned,
+    // so counting it as "unpinned" would report a gap the user cannot close.
+    if(a.excluded){ excluded++; return; }
+    if(a.pinned && a.pinned.boards!=null){
+      var ft=a.pinned.scenarioFt;
+      byLen[ft]=(byLen[ft]||0)+a.pinned.boards; pinnedAreas++;
+    } else unpinned++;
+  });
+  return { byLen:byLen, pinnedAreas:pinnedAreas, unpinnedAreas:unpinned, excludedAreas:excluded,
+           totalBoards:Object.keys(byLen).reduce(function(s,k){ return s+byLen[k]; },0) };
+}
+
+// ---- export / import ----
+function exportAll(store){ return JSON.stringify(store, null, 2); }
+function exportJob(store, jobId){
+  var j=getJob(store,jobId); if(!j) return null;
+  return JSON.stringify({ schemaVersion:store.schemaVersion, jobs:[j] }, null, 2);
+}
+// import merges jobs; a clashing id becomes a new copy (never silently overwrite).
+function importJSON(store, text){
+  var incoming; try { incoming=JSON.parse(text); } catch(e){ return { ok:false, error:"parse" }; }
+  var mig=migrate(incoming);
+  if(mig.__future) return { ok:false, error:"future" };
+  if(!Array.isArray(mig.jobs)) return { ok:false, error:"shape" };
+  var added=0;
+  mig.jobs.forEach(function(j){
+    if(store.jobs.some(function(e){ return e.id===j.id; })){ j.id=_uid(); j.name=j.name+" (imported)"; }
+    store.jobs.push(j); added++;
+  });
+  return { ok:true, added:added };
+}
+return {
+  STORE_KEY, SCHEMA_VERSION, emptyStore, migrate, loadStore, saveStore,
+  geometryDefaults, applyAreaV2,
+  createJob, getJob, renameJob, deleteJob,
+  createArea, getArea, deleteArea, defaultDims, effectiveDims,
+  pinLayout, unpinLayout, jobBoardSummary,
+  exportAll, exportJob, importJSON, _memStub,
+  _setClock:function(u,n){ _uid=u||_uid; _now=n||_now; }
+};})();
+
+/* ---- migrate_jobs.js (inlined; tested by test_persist.js) ---- */
+var StaggerMigrate = (function(){
+// ============================================================================
+//  Stagger — migrate_jobs.js
+//  One-time, NON-DESTRUCTIVE migration: stagger.jobs.v1  ->  stagger.store.v1
+//
+//  The interim model (hand-rolled inside index.html) and the proven store.js
+//  model disagree about more than field names, so this is a real translation,
+//  not a rename:
+//
+//    root   { schema, currentId, jobs:{id->job} }   ->  { schemaVersion,
+//                                                          currentJobId, jobs:[] }
+//    job    created/updated                         ->  createdAt/updatedAt
+//    area   (no id)                                 ->  id assigned here
+//    area   material : "Hardwood" | "__exclude"     ->  materialType
+//             ...store's own `material` is the {faceIn,lengthsAvailFt} object
+//    area   mode     : "imperial" | "metric"        ->  unitsMode
+//             ...store's own `mode` is the "floor"/"panel" work mode
+//
+//  Those last two are same-name/different-meaning collisions. Writing them
+//  straight across would silently corrupt both, so they are renamed here and
+//  the store's own meanings keep the original names.
+//
+//  Safety contracts:
+//   - the legacy payload is deep-copied first; the caller's object and the
+//     old localStorage key are never mutated
+//   - migration REFUSES to run if the destination already holds jobs, so a
+//     second launch cannot duplicate a job list
+//   - a record that fails the shape check is reported, never silently dropped
+// ============================================================================
+
+var LEGACY_KEY = "stagger.jobs.v1";
+
+// injectable for tests (mirrors store.js's _setClock)
+var _mUid = function(){ return "ar-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,8); };
+var _mNow = function(){ return Date.now(); };
+
+function _clone(v){ return JSON.parse(JSON.stringify(v)); }
+
+// ---- is there anything to migrate? -----------------------------------------
+function hasLegacy(storage){
+  try { return !!storage.getItem(LEGACY_KEY); } catch(e){ return false; }
+}
+
+// ---- parse + shape-check the legacy payload --------------------------------
+// Returns { ok, error, jobs:[...] } — jobs in the same order the old app listed
+// them (most recently updated first), so the preview matches what you'd see.
+function readLegacy(raw){
+  if(raw==null || raw==="") return { ok:false, error:"empty", jobs:[] };
+  var st;
+  try { st = JSON.parse(raw); } catch(e){ return { ok:false, error:"corrupt", jobs:[] }; }
+  if(!st || typeof st!=="object" || !st.jobs || typeof st.jobs!=="object")
+    return { ok:false, error:"shape", jobs:[] };
+  var jobs = Object.keys(st.jobs).map(function(k){ return st.jobs[k]; })
+    .filter(function(j){ return j && typeof j==="object" && Array.isArray(j.areas); })
+    .sort(function(a,b){ return (b.updated||0)-(a.updated||0) || (b.created||0)-(a.created||0); });
+  return { ok:true, error:null, jobs:jobs, currentId:st.currentId||null, schema:st.schema };
+}
+
+// ---- what the user sees BEFORE anything is written -------------------------
+// One row per job: exactly the figures the old job list showed.
+function previewLegacy(raw){
+  var r = readLegacy(raw);
+  if(!r.ok) return { ok:false, error:r.error, jobs:[], totalJobs:0, totalAreas:0 };
+  var rows = r.jobs.map(function(j){
+    var areas = j.areas || [];
+    return {
+      id: j.id, name: j.name || "Untitled job",
+      areaCount: areas.length,
+      sqft: areas.reduce(function(s,a){ return s + (a && a.excluded ? 0 : ((a&&a.sqft)||0)); }, 0),
+      updated: j.updated || j.created || null
+    };
+  });
+  return { ok:true, error:null, jobs:rows, totalJobs:rows.length,
+           totalAreas:rows.reduce(function(s,r2){ return s+r2.areaCount; },0) };
+}
+
+// ---- the translation itself ------------------------------------------------
+function migrateArea(a){
+  return {
+    id: _mUid(),
+    name: (typeof a.name==="string" && a.name) ? a.name : "Area",
+    mode: "floor",                       // store's WORK mode; units go to unitsMode
+    dims: { entry:"outside", outWidthIn:null, outDepthIn:null,
+            wallDefault:{ framing:"2x6", finish:"drywall-1/2" },
+            overrides:{ width:{a:null,b:null}, depth:{a:null,b:null} },
+            siteWidthIn:null, siteDepthIn:null },
+    truss: { oc:24, offsetIn:18 },
+    material: { faceIn:5.0, lengthsAvailFt:[12,14,16] },
+    pinned: null,
+    // ---- carried across from stagger.jobs.v1 ----
+    materialType: (typeof a.material==="string") ? a.material : null,
+    unitsMode: (a.mode==="metric" || a.mode==="imperial") ? a.mode : "imperial",
+    excluded: !!a.excluded,
+    rects: (a.rects!==undefined) ? a.rects : null,
+    edges: (a.edges!==undefined) ? a.edges : null,
+    inches: (a.inches!==undefined) ? a.inches : null,
+    sqft: (typeof a.sqft==="number" && isFinite(a.sqft)) ? a.sqft : null,
+    engineInput: (a.engineInput!==undefined) ? a.engineInput : null,
+    runOverride: (a.runOverride!==undefined) ? a.runOverride : null
+  };
+}
+
+function migrateJob(j){
+  return {
+    id: (typeof j.id==="string" && j.id) ? j.id : ("job-"+_mUid()),
+    name: (typeof j.name==="string" && j.name) ? j.name : "Untitled job",
+    createdAt: j.created || _mNow(),
+    updatedAt: j.updated || j.created || _mNow(),
+    wastePct: (parseFloat(j.wastePct)>=0) ? j.wastePct : 10,
+    boxCov: (typeof j.boxCov==="string") ? j.boxCov : "",
+    areas: (j.areas||[]).map(migrateArea)
+  };
+}
+
+// migrateLegacy(raw, schemaVersion) -> { ok, error, store, migrated:{jobs,areas} }
+// `raw` is the untouched string from the old key. The caller writes the result
+// to the NEW key only; the old key is not this function's business.
+function migrateLegacy(raw, schemaVersion){
+  var r = readLegacy(raw);
+  if(!r.ok) return { ok:false, error:r.error, store:null, migrated:{jobs:0,areas:0} };
+  var safe = _clone(r.jobs);              // never touch the caller's objects
+  var jobs = safe.map(migrateJob);
+  var currentJobId = null;
+  if(r.currentId && jobs.some(function(j){ return j.id===r.currentId; })) currentJobId = r.currentId;
+  else if(jobs.length) currentJobId = jobs[0].id;
+  return {
+    ok: true, error: null,
+    store: { schemaVersion: (typeof schemaVersion==="number") ? schemaVersion : 2,
+             jobs: jobs, currentJobId: currentJobId },
+    migrated: { jobs: jobs.length,
+                areas: jobs.reduce(function(s,j){ return s+j.areas.length; },0) }
+  };
+}
+
+// ---- guard: only ever migrate into an empty destination --------------------
+function shouldMigrate(legacyRaw, destStore){
+  if(!legacyRaw) return { should:false, reason:"no-legacy" };
+  if(destStore && Array.isArray(destStore.jobs) && destStore.jobs.length)
+    return { should:false, reason:"destination-not-empty" };
+  return { should:true, reason:null };
+}
+
+function backupKeyFor(now){ return LEGACY_KEY + ".backup." + (now || _mNow()); }
+return {
+  LEGACY_KEY, hasLegacy, readLegacy, previewLegacy,
+  migrateArea, migrateJob, migrateLegacy, shouldMigrate, backupKeyFor,
+  _setClock: function(u,n){ _mUid=u||_mUid; _mNow=n||_mNow; }
+};})();
+
+/* ---------- persistence · stagger.store.v1 (schema v2) ----------
+   Backed by the store.js model above: areas carry a stable id and a `pinned`
+   layout, and jobBoardSummary rolls those pins into a whole-job order.
+   The interim stagger.jobs.v1 key is migrated once, on demand, from the
+   migration preview screen — and then left exactly as it was. */
+var STORE = null, STORE_RO = false;
+
+function storeDoc(){
+  if(!STORE){ var r = StaggerStore.loadStore(); STORE = r.store; STORE_RO = !!r.readOnly; }
+  return STORE;
+}
+function storeCommit(){
+  if(STORE_RO) return false;                       // never overwrite newer data
+  return StaggerStore.saveStore(storeDoc()).ok;
 }
 function newId(){ return 'job_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
-function blankJob(){ var t=Date.now();
-  return { id:newId(), name:'Untitled job', created:t, updated:t, areas:[], wastePct:10, boxCov:'' }; }
-function validJob(j){
-  if(!j || typeof j!=='object' || !Array.isArray(j.areas)) return null;
-  j.areas=j.areas.filter(function(a){
-    return a && typeof a==='object' && Array.isArray(a.edges) && Array.isArray(a.inches) && typeof a.sqft==='number' && isFinite(a.sqft);
-  });
-  if(typeof j.id!=='string') j.id=newId();
-  if(typeof j.name!=='string') j.name='Untitled job';
-  if(!(parseFloat(j.wastePct)>=0)) j.wastePct=10;
-  if(typeof j.boxCov!=='string') j.boxCov='';
-  return j;
-}
-function storeLoad(){
-  var raw;
-  try{ raw=localStorage.getItem(STORE_KEY); }catch(_){ return null; }
-  if(!raw) return null;
-  try{
-    var st=JSON.parse(raw);
-    if(!st || !st.jobs || typeof st.jobs!=='object') return null;
-    st=stgMigrate(st); if(!st || st.__future) return null;
-    if(st.schema!==SCHEMA) return null;
-    var out={ schema:SCHEMA, currentId:null, jobs:{} };
-    Object.keys(st.jobs).forEach(function(k){ var v=validJob(st.jobs[k]); if(v) out.jobs[k]=v; });
-    var ids=Object.keys(out.jobs);
-    if(!ids.length) return null;
-    out.currentId=(st.currentId && out.jobs[st.currentId]) ? st.currentId : ids[0];
-    return out;
-  }catch(_){ try{ window.__stgRecovered=true; }catch(e){} return null; }   // corrupt record → recover clean, flag for notice
-}
-function storeSave(st){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(st)); return true; }catch(_){ return false; } }
+function blankJob(){ return StaggerStore.createJob(storeDoc(), 'Untitled job'); }
+
 function persist(){
   if(!JOB || !JOB.id) return;
-  JOB.updated=Date.now();
-  var st=storeLoad() || { schema:SCHEMA, currentId:JOB.id, jobs:{} };
-  st.jobs[JOB.id]=JOB; st.currentId=JOB.id; st.schema=SCHEMA;
-  storeSave(st);
+  JOB.updatedAt = Date.now();
+  var st = storeDoc();
+  if(!st.jobs.some(function(j){ return j.id===JOB.id; })) st.jobs.push(JOB);
+  st.currentJobId = JOB.id;
+  storeCommit();
 }
-function loadCurrentJob(){ var st=storeLoad(); return (st && st.jobs[st.currentId]) ? st.jobs[st.currentId] : null; }
+function loadCurrentJob(){
+  var st = storeDoc();
+  return StaggerStore.getJob(st, st.currentJobId) || (st.jobs.length ? st.jobs[0] : null);
+}
 function listJobs(){
-  var st=storeLoad(); if(!st) return [];
-  return Object.keys(st.jobs).map(function(k){ return st.jobs[k]; })
-    .sort(function(a,b){ return (b.updated||0)-(a.updated||0) || (b.created||0)-(a.created||0); });
+  return storeDoc().jobs.slice().sort(function(a,b){
+    return (b.updatedAt||0)-(a.updatedAt||0) || (b.createdAt||0)-(a.createdAt||0); });
 }
 function jobSqft(j){ return (j.areas||[]).reduce(function(s,a){ return s+(a.excluded?0:(a.sqft||0)); },0); }
 function createJob(){ JOB=blankJob(); persist(); openJobView(); }
 function openJob(id){
-  var st=storeLoad(); if(!st || !st.jobs[id]) return;
-  JOB=st.jobs[id]; st.currentId=id; storeSave(st); openJobView();
+  var st=storeDoc(); var j=StaggerStore.getJob(st,id); if(!j) return;
+  JOB=j; st.currentJobId=id; storeCommit(); openJobView();
 }
 function deleteJob(id){
-  var st=storeLoad(); if(!st || !st.jobs[id]) return;
-  if(!confirm('Delete \u201c'+st.jobs[id].name+'\u201d and all its areas?')) return;
-  delete st.jobs[id];
-  var ids=Object.keys(st.jobs);
-  st.currentId=ids.length?ids[0]:null;
-  storeSave(st);
+  var st=storeDoc(); var j=StaggerStore.getJob(st,id); if(!j) return;
+  if(!confirm('Delete \u201c'+j.name+'\u201d and all its areas?')) return;
+  StaggerStore.deleteJob(st,id);
+  st.currentJobId = st.jobs.length ? st.jobs[0].id : null;
+  storeCommit();
   if(JOB && JOB.id===id) JOB=null;
   renderJobs();
 }
 function renameJob(id, name){
   var nm=(name||'').trim(); if(!nm){ renamingJobIdx=-1; renderJobs(); return; }
-  var st=storeLoad(); if(st && st.jobs[id]){ st.jobs[id].name=nm; st.jobs[id].updated=Date.now(); storeSave(st); if(JOB&&JOB.id===id) JOB.name=nm; }
+  var st=storeDoc();
+  if(StaggerStore.renameJob(st,id,nm)){ storeCommit(); if(JOB&&JOB.id===id) JOB.name=nm; }
   renamingJobIdx=-1; renderJobs();
 }
 function openJobView(){ renderJob(); showView('viewJob'); }
@@ -3865,6 +4261,7 @@ function fmtWhen(ts){
 }
 var renamingJobIdx=-1;
 function renderJobs(){
+  stgSyncOldStoreNote();
   var host=document.getElementById('jobList'), jobs=listJobs();
   if(!jobs.length){
     host.innerHTML='<div class="emptyjob">No jobs yet.<br>Tap \u201c+ New job\u201d to start one.</div>';
@@ -3928,9 +4325,18 @@ function saveCurrentArea(){
   var mat=document.getElementById('areaMaterial').value;
   var name=(document.getElementById('areaName').value||'').trim();
   if(!name) name='Area '+((editingIdx>=0?editingIdx:JOB.areas.length)+1);
-  var area={ name:name, material:mat, excluded:(mat==='__exclude'),
+  var prev = (editingIdx>=0) ? JOB.areas[editingIdx] : null;
+  var area={ name:name, materialType:mat, excluded:(mat==='__exclude'),
     rects:cloneRects(rects), edges:M.edges, inches:M.inches.slice(),
-    mode:M.mode, runOverride:M.runOverride, sqft:computeSqft(), engineInput:out };
+    unitsMode:M.mode, runOverride:M.runOverride, sqft:computeSqft(), engineInput:out };
+  // store.js's own fields, plus the identity a pin hangs off. Re-saving an area
+  // must keep its id and its pinned choice — replacing the object would drop both.
+  area.id     = prev ? prev.id     : ('ar-'+Date.now().toString(36)+Math.random().toString(36).slice(2,8));
+  area.pinned = prev ? prev.pinned : null;
+  area.mode   = prev ? prev.mode   : 'floor';
+  area.dims   = prev ? prev.dims   : StaggerStore.defaultDims();
+  area.truss  = prev ? prev.truss  : { oc:24, offsetIn:18 };
+  area.material = prev ? prev.material : { faceIn:5.0, lengthsAvailFt:[12,14,16] };
   if(editingIdx>=0) JOB.areas[editingIdx]=area; else JOB.areas.push(area);
   editingIdx=-1;
   persist();
@@ -3969,7 +4375,7 @@ function renderEstLines(){
   var el=document.getElementById('estLines'); if(!el) return;
   var w=parseFloat(JOB.wastePct); if(!(w>=0)) w=0;
   var cov=parseFloat(JOB.boxCov);
-  var byMat={}; JOB.areas.forEach(function(a){ if(a.excluded) return; byMat[a.material]=(byMat[a.material]||0)+(a.sqft||0); });
+  var byMat={}; JOB.areas.forEach(function(a){ if(a.excluded) return; byMat[a.materialType]=(byMat[a.materialType]||0)+(a.sqft||0); });
   var mats=Object.keys(byMat); if(!mats.length){ el.innerHTML=''; return; }
   var h='', totalBuy=0;
   mats.forEach(function(m){ var buy=Math.ceil(byMat[m]*(1+w/100)); totalBuy+=buy;
@@ -3997,7 +4403,7 @@ function renderJob(){
     var kind = (a.engineInput&&a.engineInput.rect) ? 'Rectangle'
              : (a.engineInput&&a.engineInput.profile ? a.engineInput.profile.bands.length+'-band' : 'shape');
     var chip = a.excluded ? '<span class="matchip excl">Excluded</span>'
-             : '<span class="matchip">'+esc(matLabel(a.material))+'</span>';
+             : '<span class="matchip">'+esc(matLabel(a.materialType))+'</span>';
     return '<div class="arearow" data-i="'+i+'">'
       + '<div class="info"><div class="an">'+esc(a.name)+'</div>'
       + '<div class="am">'+chip+' \u00b7 '+fmtSqft(a.sqft)+' sq ft \u00b7 '+kind+'</div></div>'
@@ -4072,11 +4478,93 @@ function stgReadSetup(){
   if(!lengths.length) lengths=[12,14,16];   // sensible default if none entered
   return { face:face, truss:{ oc:oc, offsetIn:offset }, lengths:lengths };
 }
+/* ---------- one-time migration: stagger.jobs.v1 -> stagger.store.v1 ----------
+   Nothing is written until the user taps "Bring my jobs across", and even then
+   the old key is only ever READ. It stays on the device until they clear it by
+   hand from the jobs list. */
+function stgLegacyRaw(){
+  try{ return localStorage.getItem(StaggerMigrate.LEGACY_KEY); }catch(e){ return null; }
+}
+function stgNeedsMigration(){
+  var raw=stgLegacyRaw(); if(!raw) return false;
+  return StaggerMigrate.shouldMigrate(raw, storeDoc()).should === true;
+}
+function renderMigrate(){
+  var raw=stgLegacyRaw();
+  var pv=StaggerMigrate.previewLegacy(raw);
+  var list=document.getElementById('migList'), tot=document.getElementById('migTotal');
+  if(!list||!tot) return;
+  if(!pv.ok || !pv.totalJobs){
+    list.innerHTML='';
+    tot.textContent = pv.ok ? 'No jobs found in the old storage.'
+                            : 'The old storage could not be read ('+pv.error+'). Nothing was changed.';
+    return;
+  }
+  list.innerHTML = pv.jobs.map(function(j){
+    return '<div class="arearow"><div class="areaname">'+esc(j.name)+'</div>'
+         + '<div class="areameta">'+j.areaCount+' area'+(j.areaCount===1?'':'s')
+         + ' \u00b7 '+fmtSqft(j.sqft)+' sq ft \u00b7 '+esc(fmtWhen(j.updated))+'</div></div>';
+  }).join('');
+  tot.textContent = pv.totalJobs+' job'+(pv.totalJobs===1?'':'s')+' \u00b7 '
+                  + pv.totalAreas+' area'+(pv.totalAreas===1?'':'s')+' found';
+}
+function showMigrate(){ renderMigrate(); showView('viewMigrate'); }
+function stgMigMsg(t){
+  var n=document.getElementById('migMsg'); if(!n) return;
+  n.textContent=t; n.hidden=!t;
+}
+function stgDoMigrate(){
+  var raw=stgLegacyRaw();
+  var chk=StaggerMigrate.shouldMigrate(raw, storeDoc());
+  if(!chk.should){ stgMigMsg('Nothing to bring across ('+chk.reason+').'); return; }
+  var res=StaggerMigrate.migrateLegacy(raw, StaggerStore.SCHEMA_VERSION);
+  if(!res.ok){ stgMigMsg('The old storage could not be read ('+res.error+'). Nothing was changed.'); return; }
+  // back the old payload up BEFORE writing anything new
+  var backedUp=true;
+  try{ localStorage.setItem(StaggerMigrate.backupKeyFor(Date.now()), raw); }
+  catch(e){ backedUp=false; }
+  STORE=res.store; STORE_RO=false;
+  if(!storeCommit()){
+    STORE=null;   // drop the half-made state; the old key is still untouched
+    stgMigMsg('Could not save to this device\u2019s storage. Nothing was changed \u2014 your old jobs are still there.');
+    return;
+  }
+  JOB=loadCurrentJob();
+  renderJobs();
+  // Stay put and report honestly; the user taps Continue when they've read it.
+  stgMigMsg(res.migrated.jobs+' job'+(res.migrated.jobs===1?'':'s')+' and '+res.migrated.areas
+    +' area'+(res.migrated.areas===1?'':'s')+' brought across. Your old copy is untouched.'
+    +(backedUp?' A second backup was saved on this device.'
+              :' NOTE: the extra backup copy could not be written \u2014 your original data is still untouched.'));
+  var done=document.getElementById('migDone'); if(done) done.hidden=false;
+  ['migGo','migBackup','migSkip'].forEach(function(id){
+    var b=document.getElementById(id); if(b) b.hidden=true; });
+  var mt=document.getElementById('migTotal');
+  if(mt) mt.textContent='Brought across \u2014 '+res.migrated.jobs+' job'
+    +(res.migrated.jobs===1?'':'s')+', '+res.migrated.areas+' area'+(res.migrated.areas===1?'':'s')+'.';
+}
+function stgSyncOldStoreNote(){
+  var n=document.getElementById('oldStoreNote'); if(!n) return;
+  // Only offer the clear once the jobs are safely in the new storage.
+  var migrated = storeDoc().jobs.length > 0;
+  n.hidden = !(migrated && !!stgLegacyRaw());
+}
+function stgClearLegacy(){
+  if(!stgLegacyRaw()){ return; }
+  if(!confirm('Remove the OLD storage copy of your jobs?\n\nYour jobs stay in the new storage. This only clears the old copy, and it cannot be undone.')) return;
+  try{ localStorage.removeItem(StaggerMigrate.LEGACY_KEY); }catch(e){}
+  renderJobs();
+}
 function stgOpenJobs(){
   var ov=document.getElementById('jobsOverlay'); if(!ov) return;
   ov.hidden=false;
   if(!_stgBooted){
     _stgBooted=true;
+    if(stgNeedsMigration()){
+      try{ if(window.__stgRecovered){ var rn=document.getElementById('stgRecovered'); if(rn) rn.hidden=false; } }catch(e){}
+      showMigrate();
+      return;
+    }
     try{ if(window.__stgRecovered){ var n=document.getElementById('stgRecovered'); if(n) n.hidden=false; } }catch(e){}
     if(typeof JOB!=='undefined' && JOB) openJobView(); else showJobs();
   } else {
@@ -4084,6 +4572,29 @@ function stgOpenJobs(){
     if(typeof JOB!=='undefined' && JOB) renderJob(); else renderJobs();
   }
 }
+(function stgWireOldStore(){
+  var b=document.getElementById('clearOldStore');
+  if(b) b.addEventListener('click', stgClearLegacy);
+})();
+(function stgWireMigrate(){
+  var go=document.getElementById('migGo'), skip=document.getElementById('migSkip'),
+      bak=document.getElementById('migBackup');
+  if(go)   go.addEventListener('click', stgDoMigrate);
+  var done=document.getElementById('migDone');
+  if(done) done.addEventListener('click', function(){
+    JOB=loadCurrentJob(); if(JOB) openJobView(); else showJobs(); });
+  if(skip) skip.addEventListener('click', function(){ JOB=loadCurrentJob(); if(JOB) openJobView(); else showJobs(); });
+  if(bak)  bak.addEventListener('click', function(){
+    var raw=stgLegacyRaw();
+    if(!raw){ stgMigMsg('There is nothing to back up.'); return; }
+    if(typeof downloadFile==='function'){
+      downloadFile('stagger-jobs-backup-'+new Date().toISOString().slice(0,10)+'.json','application/json',raw);
+      stgMigMsg('Backup downloaded. Your jobs have not been changed.');
+    } else {
+      stgMigMsg('This browser cannot download the backup file. Your jobs have not been changed.');
+    }
+  });
+})();
 function stgCloseJobs(){ var ov=document.getElementById('jobsOverlay'); if(ov) ov.hidden=true; }
 
 (function(){
@@ -4112,7 +4623,7 @@ function stgRenderBoardEstimate(){
   var lines='<div class="esthead">Board estimate <span class="stgsub">(uses your Setup: '
     + fmtIn(setup.face) + ' face, ' + setup.truss.oc + '\u2033 o.c., stock '
     + setup.lengths.map(function(f){return f+"\u2032";}).join('/') + ')</span></div>';
-  var jobByLen={};
+  var stgRows={};
   JOB.areas.forEach(function(a){
     if(a.excluded) return;
     var ei=a.engineInput;
@@ -4128,24 +4639,59 @@ function stgRenderBoardEstimate(){
       return;
     }
     var best=res.ranked[0];
-    jobByLen[best.lengthFt]=(jobByLen[best.lengthFt]||0)+best.boards;
-    // per-area spread table (compact): best length highlighted
+    var pin=a.pinned||null;
+    stgRows[a.id]=res.rows;          // remembered so a tap can find its row again
+    // per-area spread table (compact): best length highlighted, pin marked
     lines+='<div class="stgArea"><div class="stgAreaName">'+esc(a.name)+' \u00b7 '+fmtSqft(a.sqft||0)+' sq ft</div>';
-    lines+='<table class="stgTbl"><tr><th>Len</th><th>Boards</th><th>Seams</th><th>Waste</th></tr>';
+    lines+='<table class="stgTbl"><tr><th>Len</th><th>Boards</th><th>Seams</th><th>Waste</th><th>Pin</th></tr>';
     res.rows.forEach(function(r){
-      if(!r.ok){ lines+='<tr class="no"><td>'+r.lengthFt+"\u2032</td><td colspan=3>"+esc(r.quality)+'</td></tr>'; return; }
+      if(!r.ok){ lines+='<tr class="no"><td>'+r.lengthFt+"\u2032</td><td colspan=4>"+esc(r.quality)+'</td></tr>'; return; }
       var b=(r===best||r.best);
-      lines+='<tr'+(b?' class="best"':'')+'><td>'+r.lengthFt+"\u2032</td><td>"+r.boards+'</td><td>'+r.seams+'</td><td>'+(r.waste!=null?r.waste+'%':'\u2014')+'</td></tr>';
+      // "best" is the engine's opinion; "pinned" is the carpenter's decision.
+      var isPin=(pin && pin.scenarioFt===r.lengthFt);
+      var cls=(isPin?'pinned':(b?'best':''));
+      lines+='<tr'+(cls?' class="'+cls+'"':'')+'><td>'+r.lengthFt+"\u2032</td><td>"+r.boards+'</td><td>'+r.seams+'</td><td>'+(r.waste!=null?r.waste+'%':'\u2014')+'</td>'
+           + '<td><button type="button" class="stgPin'+(isPin?' on':'')+'" data-pin-area="'+esc(a.id)+'" data-pin-len="'+r.lengthFt+'"'
+           + ' aria-pressed="'+(isPin?'true':'false')+'" title="'+(isPin?'Pinned \u2014 tap to unpin':'Pin this length for '+esc(a.name))+'">'
+           + (isPin?'\ud83d\udccc':'\u00b7') + '</button></td></tr>';
     });
-    lines+='</table></div>';
+    lines+='</table>'+(pin?'<div class="stgPinNote">Pinned: '+pin.scenarioFt+"\u2032 \u00b7 "+pin.boards+' boards</div>':'')+'</div>';
   });
-  // whole-job shopping list from each area's best length
-  var lens=Object.keys(jobByLen).map(Number).sort(function(a,b){return a-b;});
-  if(lens.length){
-    var parts=lens.map(function(ft){ return jobByLen[ft]+"\u00d7 "+ft+"\u2032"; });
-    lines+='<div class="stgShop"><span class="lab">Whole-job order (best length per area)</span><span class="val">'+parts.join('  +  ')+'</span></div>';
+  // whole-job shopping list, summed from the lengths YOU pinned
+  var sum = StaggerStore.jobBoardSummary(storeDoc(), JOB.id);
+  if(sum && sum.pinnedAreas){
+    lines+='<div class="stgShop"><span class="lab">Whole-job order</span>'
+         + '<span class="val">'+esc(shoppingList(sum.byLen))+'</span></div>';
+    if(sum.unpinnedAreas){
+      // Honest reporting: say what is NOT counted rather than quietly under-ordering.
+      lines+='<div class="stgShopNote">'+sum.unpinnedAreas+' area'+(sum.unpinnedAreas>1?'s':'')
+           + ' not pinned \u2014 not counted above.</div>';
+    }
+  } else if(sum){
+    lines+='<div class="stgShopNote">Pin a length in each area to build the whole-job order.</div>';
   }
   box.innerHTML=lines;
+  // wire the pin buttons (render-then-query, the convention used by renderJob)
+  Array.prototype.forEach.call(box.querySelectorAll('[data-pin-area]'), function(btn){
+    btn.addEventListener('click', function(){
+      var areaId=btn.getAttribute('data-pin-area'), len=+btn.getAttribute('data-pin-len');
+      var st=storeDoc(), area=StaggerStore.getArea(StaggerStore.getJob(st,JOB.id), areaId);
+      if(!area) return;
+      if(area.pinned && area.pinned.scenarioFt===len){
+        StaggerStore.unpinLayout(st, JOB.id, areaId);
+      } else {
+        var rows=stgRows[areaId]||[], row=null;
+        for(var i=0;i<rows.length;i++){ if(rows[i].lengthFt===len && rows[i].ok){ row=rows[i]; break; } }
+        if(!row) return;
+        // spread.js calls it lengthFt; store.js calls it scenarioFt. Map at the seam.
+        StaggerStore.pinLayout(st, JOB.id, areaId, {
+          scenarioFt: row.lengthFt, boards: row.boards,
+          rowJoints: row.rowJoints, label: row.label || (row.lengthFt + "' stock") });
+      }
+      storeCommit();
+      stgRenderBoardEstimate();
+    });
+  });
 }
 
 })();

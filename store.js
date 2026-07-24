@@ -12,7 +12,7 @@
 // ============================================================================
 
 var STORE_KEY = "stagger.store.v1";
-var SCHEMA_VERSION = 1;
+var SCHEMA_VERSION = 2;
 
 // ---- id + clock (injectable for tests) ----
 function _uid(){
@@ -22,14 +22,48 @@ function _now(){ return Date.now(); }
 
 // ---- the empty store ----
 function emptyStore(){
-  return { schemaVersion: SCHEMA_VERSION, jobs: [] };
+  return { schemaVersion: SCHEMA_VERSION, jobs: [], currentJobId: null };
+}
+
+// ---- v2 area/job defaults --------------------------------------------------
+// v2 absorbed the drawn-geometry model that used to live under stagger.jobs.v1.
+// Two field names collided across the two models and were renamed on the way in:
+//   material (string "Hardwood"/"__exclude")  -> materialType   [store's own
+//              `material` stays the {faceIn,lengthsAvailFt} stock object]
+//   mode     (units "imperial"/"metric")      -> unitsMode      [store's own
+//              `mode` stays the "floor"/"panel" work mode]
+// Anything that renames a field must also add it here, or migrated records and
+// freshly-created ones drift apart.
+function geometryDefaults(){
+  return { materialType:null, unitsMode:"imperial", excluded:false,
+           rects:null, edges:null, inches:null, sqft:null,
+           engineInput:null, runOverride:null };
+}
+function applyAreaV2(a){
+  var d=geometryDefaults();
+  Object.keys(d).forEach(function(k){ if(a[k]===undefined) a[k]=d[k]; });
+  if(a.pinned===undefined) a.pinned=null;
+  if(typeof a.id!=="string") a.id=_uid();
+  return a;
 }
 
 // ---- migrations: index i upgrades vFrom i -> i+1. Append only; never rewrite.
 //      Each must be pure and non-destructive (add fields, don't drop data). ----
 var MIGRATIONS = [
-  // example shape for the future:
-  // function v1_to_v2(s){ s.jobs.forEach(j=>{ if(j.tag===undefined) j.tag=null; }); return s; }
+  // [0] v0 -> v1 : the original shape; nothing to add.
+  null,
+  // [1] v1 -> v2 : geometry fields on areas, waste/box on jobs, currentJobId on
+  //     the root. Additive only — no existing field is renamed or dropped here.
+  function v1_to_v2(s){
+    if(s.currentJobId===undefined) s.currentJobId=null;
+    (s.jobs||[]).forEach(function(j){
+      if(j.wastePct===undefined) j.wastePct=10;
+      if(j.boxCov===undefined) j.boxCov="";
+      if(!Array.isArray(j.areas)) j.areas=[];
+      j.areas.forEach(applyAreaV2);
+    });
+    return s;
+  }
 ];
 
 function migrate(store){
@@ -88,7 +122,8 @@ function _memStub(){ var m={}; return {
 
 // ---- job CRUD ----
 function createJob(store, name){
-  var job = { id:_uid(), name:(name||"Untitled job").trim(), createdAt:_now(), updatedAt:_now(), areas:[] };
+  var job = { id:_uid(), name:(name||"Untitled job").trim(), createdAt:_now(), updatedAt:_now(),
+              areas:[], wastePct:10, boxCov:"" };
   store.jobs.push(job);
   return job;
 }
@@ -114,6 +149,7 @@ function createArea(store, jobId, name, mode){
   var area={ id:_uid(), name:(name||"New area").trim(), mode:(mode||"floor"),
              dims:defaultDims(), truss:{ oc:24, offsetIn:18 },
              material:{ faceIn:5.0, lengthsAvailFt:[12,14,16] }, pinned:null };
+  applyAreaV2(area);
   j.areas.push(area); j.updatedAt=_now(); return area;
 }
 function getArea(job, areaId){ return job ? (job.areas.find(function(a){ return a.id===areaId; })||null) : null; }
@@ -151,14 +187,17 @@ function unpinLayout(store, jobId, areaId){
 // ---- job totals: sum pinned boards across areas, grouped by stock length ----
 function jobBoardSummary(store, jobId){
   var j=getJob(store,jobId); if(!j) return null;
-  var byLen={}, pinnedAreas=0, unpinned=0;
+  var byLen={}, pinnedAreas=0, unpinned=0, excluded=0;
   j.areas.forEach(function(a){
+    // An excluded area is deliberately out of the job — it can never be pinned,
+    // so counting it as "unpinned" would report a gap the user cannot close.
+    if(a.excluded){ excluded++; return; }
     if(a.pinned && a.pinned.boards!=null){
       var ft=a.pinned.scenarioFt;
       byLen[ft]=(byLen[ft]||0)+a.pinned.boards; pinnedAreas++;
     } else unpinned++;
   });
-  return { byLen:byLen, pinnedAreas:pinnedAreas, unpinnedAreas:unpinned,
+  return { byLen:byLen, pinnedAreas:pinnedAreas, unpinnedAreas:unpinned, excludedAreas:excluded,
            totalBoards:Object.keys(byLen).reduce(function(s,k){ return s+byLen[k]; },0) };
 }
 
@@ -184,6 +223,7 @@ function importJSON(store, text){
 
 if(typeof module!=="undefined") module.exports = {
   STORE_KEY, SCHEMA_VERSION, emptyStore, migrate, loadStore, saveStore,
+  geometryDefaults, applyAreaV2,
   createJob, getJob, renameJob, deleteJob,
   createArea, getArea, deleteArea, defaultDims, effectiveDims,
   pinLayout, unpinLayout, jobBoardSummary,
