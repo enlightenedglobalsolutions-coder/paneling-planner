@@ -11,14 +11,15 @@ Extends the EGS working standards in `../../CLAUDE.md`. Only repo-specific rules
 |---|---|---|---|
 | `store.js` | `StaggerStore` IIFE | `test_store.js`, `test_jobs.js` | **yes** |
 | `migrate_jobs.js` | `StaggerMigrate` IIFE | `test_persist.js` | **yes** |
+| `diagnose.js` | `StaggerDiag` IIFE | `test_diagnose.js` | **yes** |
 | `spread.js` | bare, `/* ---- spread.js ---- */` | `v2-modules/test_spread.js` | no — by hand |
 | `lshape.js` | bare, `/* ---- lshape.js ---- */` | `test_lshape.js` | no — by hand |
 | `bridge.js` | bare | `test_bridge.js` | no — by hand |
 
 (`inside_dims.js` is **not** inlined — it has no consumer in `index.html` yet.)
 
-**After editing `store.js` or `migrate_jobs.js`, run `python3 reinline.py` before testing or
-deploying.** It rewrites those two blocks from the modules on disk, takes a timestamped backup,
+**After editing `store.js`, `migrate_jobs.js` or `diagnose.js`, run `python3 reinline.py` before
+testing or deploying.** It rewrites those blocks from the modules on disk, takes a timestamped backup,
 and is idempotent — running it with no module changes is a 0-byte edit.
 
 The other three were inlined by hand and `index.html` wraps them in adapters it does not share

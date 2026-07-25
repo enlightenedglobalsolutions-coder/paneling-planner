@@ -23,8 +23,10 @@ orig_len = len(html)
 BLOCKS = [
     ("var StaggerStore = (function(){",   "/* ---- migrate_jobs.js (inlined",
      os.path.join(REPO, "store.js"),        "StaggerStore"),
-    ("var StaggerMigrate = (function(){", "/* ---------- persistence · stagger.store.v1",
+    ("var StaggerMigrate = (function(){", "/* ---- diagnose.js (inlined",
      os.path.join(REPO, "migrate_jobs.js"), "StaggerMigrate"),
+    ("var StaggerDiag = (function(){",    "/* ---------- persistence · stagger.store.v1",
+     os.path.join(REPO, "diagnose.js"),     "StaggerDiag"),
 ]
 
 for start, end, path, var in BLOCKS:
