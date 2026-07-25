@@ -31,7 +31,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.25-0856';</script>
+<script>window.EGS_VERSION = '2026.07.25-1011';</script>
 <title>EGS Paneling Planner</title>
 <style>
   :root{
@@ -415,6 +415,35 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
 .oldstore{margin:14px 2px 0;padding:10px 12px;border:1px solid rgba(190,150,70,.35);
   border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .oldstore .lab{flex:1;font-size:13px;opacity:.85;}
+.jobsMsg{margin:10px 2px 0;padding:9px 12px;border-radius:10px;font-size:13px;line-height:1.45;
+  background:rgba(190,150,70,.12);border:1px solid rgba(190,150,70,.3);color:#e8d6a8;}
+.jobsMsg[hidden]{display:none;}
+
+/* ===== SUPPORT & BACKUP ===== */
+#jobsOverlay .supWrap{padding:2px 14px calc(20px + env(safe-area-inset-bottom));}
+#jobsOverlay .supHead{display:flex;align-items:center;gap:10px;margin:20px 2px 8px;}
+#jobsOverlay .supHead .lab{font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--gold);font-weight:700;white-space:nowrap;}
+#jobsOverlay .supHead .rule{flex:1;height:1px;background:rgba(214,168,75,.22);}
+#jobsOverlay .supCard{background:var(--panel2);border:1px solid rgba(214,168,75,.18);
+  border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.6;color:#d8cbb4;}
+#jobsOverlay .supRow{display:flex;gap:10px;margin:10px 0 4px;}
+#jobsOverlay .supRow > *{flex:1;}
+#jobsOverlay .supMsg{margin:10px 2px 0;padding:9px 12px;border-radius:10px;font-size:13px;
+  line-height:1.45;background:rgba(190,150,70,.12);border:1px solid rgba(190,150,70,.3);color:#e8d6a8;}
+#jobsOverlay .supMsg[hidden]{display:none;}
+#jobsOverlay .supFoot{margin:18px 2px 0;text-align:center;font-size:11.5px;line-height:1.6;color:#8d7c62;}
+#jobsOverlay .payTabs{display:flex;gap:7px;flex-wrap:wrap;margin:4px 0 12px;}
+#jobsOverlay button.payTab{padding:7px 13px;font-size:13px;border-radius:20px;}
+#jobsOverlay button.payTab.on{background:var(--brass);border:none;color:#241a08;font-weight:700;}
+#jobsOverlay .payLine{display:flex;align-items:center;gap:10px;padding:6px 0;}
+#jobsOverlay .payLine .k{flex:1;color:var(--dim);font-size:13px;}
+#jobsOverlay .payLine .v{font-weight:700;font-size:13.5px;color:#F2DD6E;}
+#jobsOverlay .payAddr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  word-break:break-all;color:#efe4d1;background:#17110a;border-radius:8px;padding:9px 10px;
+  margin:6px 0 10px;-webkit-user-select:text;user-select:text;}
+#jobsOverlay button.supCopy{padding:6px 12px;font-size:12.5px;border-radius:9px;}
+#jobsOverlay .payNote{margin-top:10px;font-size:12.5px;line-height:1.55;color:var(--dim);text-align:center;}
 .diagOk,.diagBad{margin:6px 2px 10px;padding:12px 14px;border-radius:10px;font-weight:700;}
 .diagOk{background:rgba(120,170,110,.18);border:1px solid rgba(120,170,110,.5);}
 .diagBad{background:rgba(190,90,70,.18);border:1px solid rgba(190,90,70,.55);}
@@ -2714,20 +2743,29 @@ $("f-btn-generate").addEventListener("click", FL.generate);
   <p class="guide">Each job holds its own areas, totals and materials.</p>
   <div class="arealist" id="jobList"></div>
   <div class="actions"><button class="gold grow" id="newJob">+ New job</button></div>
+  <div class="actions"><button class="ghost grow" id="openSupport">💾 Save &amp; Support</button></div>
   <div class="oldstore" id="oldStoreNote" hidden>
     <span class="lab">The old storage copy of your jobs is still on this device.</span>
     <button class="ghost" id="checkMigration">Check migration</button>
     <button class="ghost" id="clearOldStore">Remove old copy</button>
   </div>
+  <div class="jobsMsg" id="jobsMsg" hidden></div>
 </section>
 
-<!-- ============ VIEW 0 · JOB / AREAS ============ -->
+<!-- ============ VIEW · STORAGE CHECK ============ -->
 <section class="view" id="viewDiag">
   <div class="topbar"><button class="ghost" id="diagBack">← Jobs</button><span class="name">Storage check</span></div>
   <header><p class="eyebrow">Read-only</p><h1>Migration report</h1></header>
   <p class="guide">Nothing on this screen changes anything. It reads both copies of your
     data and reports what it finds.</p>
   <div id="diagBody"></div>
+</section>
+
+<!-- ============ VIEW · SUPPORT & BACKUP ============ -->
+<section class="view" id="viewSupport">
+  <div class="topbar"><button class="ghost" id="supBack">← Jobs</button><span class="name" id="supBarName">Support &amp; Backup</span></div>
+  <header><p class="eyebrow">Stagger</p><h1 id="supTitle">Support &amp; Backup</h1></header>
+  <div class="supWrap" id="supBody"></div>
 </section>
 <section class="view" id="viewMigrate">
   <header><p class="eyebrow">Storage</p><h1>Bring your jobs across</h1></header>
@@ -3478,7 +3516,7 @@ function px2u(px){ return px/(CELL*zoom); }
 
 /* ---------- view switching ---------- */
 function showView(id){
-  ['viewJobs','viewJob','viewPick','viewDraw','viewMeasure','viewMigrate','viewDiag'].forEach(function(v){
+  ['viewJobs','viewJob','viewPick','viewDraw','viewMeasure','viewMigrate','viewDiag','viewSupport'].forEach(function(v){
     document.getElementById(v).classList.toggle('on', v===id);
   });
 }
@@ -4526,7 +4564,7 @@ function renameJob(id, name){
   renamingJobIdx=-1; renderJobs();
 }
 function openJobView(){ renderJob(); showView('viewJob'); }
-function showJobs(){ renderJobs(); showView('viewJobs'); }
+function showJobs(){ stgJobsMsg(''); renderJobs(); showView('viewJobs'); }
 function fmtWhen(ts){
   if(!ts) return '';
   var d=Math.floor((Date.now()-ts)/86400000);
@@ -4914,10 +4952,26 @@ function stgSyncOldStoreNote(){
   var migrated = storeDoc().jobs.length > 0;
   n.hidden = !(migrated && !!stgLegacyRaw());
 }
+function stgJobsMsg(t){
+  var n=document.getElementById('jobsMsg'); if(!n) return;
+  n.textContent=t||''; n.hidden=!t;
+}
 function stgClearLegacy(){
-  if(!stgLegacyRaw()){ return; }
-  if(!confirm('Remove the OLD storage copy of your jobs?\n\nYour jobs stay in the new storage. This only clears the old copy, and it cannot be undone.')) return;
-  try{ localStorage.removeItem(StaggerMigrate.LEGACY_KEY); }catch(e){}
+  // Never no-op in silence: if there is nothing to remove, say so and re-sync
+  // the notice, which only refreshes inside renderJobs() and can go stale.
+  if(!stgLegacyRaw()){
+    stgSyncOldStoreNote();
+    stgJobsMsg('There is nothing to remove — the old copy is already gone.');
+    return;
+  }
+  if(!confirm('Remove the OLD storage copy of your jobs?\n\nYour jobs stay in the new storage. This only clears the old copy, and it cannot be undone.')){
+    stgJobsMsg('Cancelled — nothing was changed.');
+    return;
+  }
+  var okRemoved=false;
+  try{ localStorage.removeItem(StaggerMigrate.LEGACY_KEY); okRemoved=!stgLegacyRaw(); }catch(e){}
+  stgJobsMsg(okRemoved ? 'Old copy removed. Your jobs are unchanged.'
+                       : 'Could not remove the old copy — nothing was changed.');
   renderJobs();
 }
 function stgOpenJobs(){
@@ -4946,6 +5000,235 @@ function stgOpenJobs(){
 (function stgWireOldStore(){
   var b=document.getElementById('clearOldStore');
   if(b) b.addEventListener('click', stgClearLegacy);
+})();
+
+/* ---------- Support & Backup (EGS standard) ----------
+   Ported from the canonical Gen 2 pattern (renderSupport + egsSupportCoreHtml,
+   see apps/Roadside/index.html) into this file's ES5 + static-view idiom.
+
+   STORE BUILDS: EGS-DECISIONS.md says donation links inside a store app read as
+   circumventing Apple/Play billing. Flip the flag below to true for a Play/App
+   Store build — the backup half stays, the whole Contribute half disappears. */
+var STAGGER_STORE_BUILD = false;
+
+var PAYMENT_CONFIG = {
+  interacEmail: 'egspay.pay@gmail.com',
+  interacMemo:  'Stagger Donation',
+  btc:          'bc1qdznclm0fmtvneegrfm8vefqgqmawnrw7wtn5es',
+  stripe:       'STRIPE_PAYMENT_LINK',
+  paypal:       'PAYPAL_DONATE_LINK',
+  wise:         'WISE_PAYMENT_LINK'
+};
+var PAYMENT_TABS = [
+  {id:'interac', label:'🏦 Interac'},
+  {id:'btc',     label:'₿ Bitcoin'},
+  {id:'card',    label:'💳 Credit Card'},
+  {id:'paypal',  label:'PayPal'},
+  {id:'wise',    label:'Wise'}
+];
+var supportTab = 'interac';
+
+// A method counts as live only once its placeholder has been replaced. Unset
+// methods say so instead of rendering a link that goes nowhere.
+var PAY_PLACEHOLDERS = ['STRIPE_PAYMENT_LINK','PAYPAL_DONATE_LINK','WISE_PAYMENT_LINK','YOUR_BTC_ADDRESS'];
+function paySet(v){
+  if(!v) return false;
+  for(var i=0;i<PAY_PLACEHOLDERS.length;i++){ if(v===PAY_PLACEHOLDERS[i]) return false; }
+  return true;
+}
+function paySoon(name){
+  return '<div class="supCard">'+esc(name)+' isn’t set up yet. Interac and Bitcoin both work today — '
+       + 'pick one of those tabs.</div>';
+}
+function payLink(url,label){
+  return '<button class="gold" style="width:100%" data-payopen="'+esc(url)+'">'+esc(label)+'</button>';
+}
+
+function paymentDetailHtml(tab){
+  if(tab==='interac'){
+    return '<div class="supCard">'
+      + '<div class="payLine"><span class="k">Send to email</span>'
+      +   '<span class="v">'+esc(PAYMENT_CONFIG.interacEmail)+'</span>'
+      +   '<button class="supCopy" data-copy="'+esc(PAYMENT_CONFIG.interacEmail)+'">Copy</button></div>'
+      + '<div class="payLine"><span class="k">Message / memo</span><span class="v">'+esc(PAYMENT_CONFIG.interacMemo)+'</span></div>'
+      + '<div class="payLine"><span class="k">Auto-deposit</span><span class="v">Enabled</span></div>'
+      + '</div>'
+      + '<div class="payNote">Open your Canadian bank app → Interac e-Transfer → Send to the email above.<br>'
+      + 'No password needed if auto-deposit is enabled. 🍁</div>';
+  }
+  if(tab==='btc'){
+    if(!paySet(PAYMENT_CONFIG.btc)) return paySoon('Bitcoin');
+    return '<div class="supCard">'
+      + '<div class="payLine"><span class="k">Bitcoin wallet address</span></div>'
+      + '<div class="payAddr">'+esc(PAYMENT_CONFIG.btc)+'</div>'
+      + '<button class="supCopy" data-copy="'+esc(PAYMENT_CONFIG.btc)+'">Copy address</button>'
+      + '</div>'
+      + '<div class="payNote">Send any amount in any currency — your wallet converts it.<br>Thank you. 🙏</div>';
+  }
+  if(tab==='card')   return paySet(PAYMENT_CONFIG.stripe) ? payLink(PAYMENT_CONFIG.stripe,'Open secure checkout') : paySoon('Card payment');
+  if(tab==='paypal') return paySet(PAYMENT_CONFIG.paypal) ? payLink(PAYMENT_CONFIG.paypal,'Donate via PayPal')    : paySoon('PayPal');
+  if(tab==='wise')   return paySet(PAYMENT_CONFIG.wise)   ? payLink(PAYMENT_CONFIG.wise,'Send via Wise')          : paySoon('Wise');
+  return '';
+}
+
+/* EGS CORE — copied from the canonical pattern. One deliberate omission: the
+   canonical block links to an in-app Privacy page, and Stagger has none, so the
+   row is left out rather than shipping a dead link. Add it back with the page. */
+function egsSupportCoreHtml(){
+  var tabs='';
+  PAYMENT_TABS.forEach(function(t){
+    tabs+='<button class="payTab'+(t.id===supportTab?' on':'')+'" data-paytab="'+esc(t.id)+'">'+t.label+'</button>';
+  });
+  return '<div class="supHead"><span class="lab">Support EGS</span><span class="rule"></span></div>'
+    + '<div class="supCard">Enlightened Global Solutions is a one-person, Canadian shop building tools '
+    + 'the way I’d want them built — privacy-first, no subscriptions, no shortcuts. If this app has '
+    + 'been useful to you, a contribution below helps keep it that way.</div>'
+    + '<div class="payTabs" style="margin-top:12px">'+tabs+'</div>'
+    + '<div id="payDetail">'+paymentDetailHtml(supportTab)+'</div>'
+    + '<div class="supFoot">Built by one person in Canada · no shareholders, no ads, ever<br>'
+    + 'Contributions are voluntary. Every bit helps keep EGS independent. Thank you.</div>';
+}
+
+function renderSupport(){
+  var h='<div class="supHead"><span class="lab">Back up your data</span><span class="rule"></span></div>'
+    + '<div class="supCard">Save every job, area and pinned layout to a file. Keep it somewhere safe — '
+    + 'you can restore it anytime, even on a new phone or after reinstalling.</div>'
+    + '<div class="supRow">'
+    +   '<button class="gold" id="supExport">⬇ Export</button>'
+    +   '<button class="ghost" id="supRestore">⬆ Restore</button>'
+    + '</div>'
+    + '<input type="file" id="supFile" accept="application/json,.json" hidden>'
+    + '<div class="supMsg" id="supMsg" hidden></div>';
+  if(!STAGGER_STORE_BUILD){
+    h+='<div class="supHead"><span class="lab">Free, always</span><span class="rule"></span></div>'
+      + '<div class="supCard">Stagger’s flooring engine is free to use, always — no trial, no paywall. '
+      + 'A contribution is welcome but never expected.</div>'
+      + egsSupportCoreHtml();
+  }
+  var host=document.getElementById('supBody'); if(host) host.innerHTML=h;
+  var title=document.getElementById('supTitle'), bar=document.getElementById('supBarName');
+  var label=STAGGER_STORE_BUILD?'Back up your data':'Support & Backup';
+  if(title) title.textContent=label;
+  if(bar)   bar.textContent=label;
+  stgWireSupportBody();
+}
+function showSupport(){ renderSupport(); showView('viewSupport'); }
+function stgSupportMsg(t){
+  var n=document.getElementById('supMsg'); if(!n) return;
+  n.textContent=t||''; n.hidden=!t;
+}
+function bindCopyButtons(scope){
+  if(!scope) return;
+  var btns=scope.querySelectorAll('[data-copy]');
+  Array.prototype.forEach.call(btns, function(b){
+    b.addEventListener('click', function(){
+      var val=b.getAttribute('data-copy');
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(val).then(function(){ stgSupportMsg('Copied.'); },
+          function(){ stgSupportMsg('Could not copy — press and hold the text above to select it.'); });
+      } else {
+        stgSupportMsg('Could not copy — press and hold the text above to select it.');
+      }
+    });
+  });
+}
+
+function stgBackupName(){
+  return 'stagger-backup-'+new Date().toISOString().slice(0,10)+'.json';
+}
+function stgBackupText(){
+  // Envelope carries the sentinel; importJSON wants the bare store back out of it.
+  return JSON.stringify({ app:'stagger', version:1,
+    exportedAt:new Date().toISOString(), store:storeDoc() }, null, 2);
+}
+function stgExportData(){
+  if(typeof downloadFile!=='function'){
+    stgSupportMsg('This browser cannot download files. Nothing was changed.'); return false;
+  }
+  var ok=downloadFile(stgBackupName(),'application/json',stgBackupText());
+  stgSupportMsg(ok ? 'Backup downloaded.' : 'Could not create the backup file. Nothing was changed.');
+  return ok;
+}
+function stgImportData(ev){
+  var input=ev.target;
+  var file=input && input.files && input.files[0];
+  if(!file){ return; }
+  var reader=new FileReader();
+  reader.onerror=function(){ input.value=''; stgSupportMsg('Could not read that file.'); };
+  reader.onload=function(e){
+    input.value='';
+    var env;
+    try{ env=JSON.parse(String(e.target.result)); }
+    catch(err){ stgSupportMsg('That file isn’t readable JSON. Nothing was changed.'); return; }
+    if(!env || env.app!=='stagger' || !env.store){
+      stgSupportMsg('That doesn’t look like a Stagger backup. Nothing was changed.'); return;
+    }
+    // Tier 1 — back up before any write. Silent, automatic, before we touch anything.
+    if(typeof downloadFile==='function'){
+      downloadFile('stagger-before-restore-'+new Date().toISOString().slice(0,10)+'.json',
+                   'application/json', stgBackupText());
+    }
+    if(!confirm('Restore this backup?\n\nJobs are ADDED alongside what you already have — nothing is '
+              + 'overwritten. Any job with a clashing id comes in renamed "(imported)".\n\n'
+              + 'A copy of your current data has just been downloaded first.')){
+      stgSupportMsg('Cancelled — nothing was changed.'); return;
+    }
+    var r=StaggerStore.importJSON(storeDoc(), JSON.stringify(env.store));
+    if(!r.ok){
+      var why={parse:'the file could not be parsed',
+               future:'it was written by a NEWER version of Stagger — update this app first',
+               shape:'it is not shaped like a Stagger store'}[r.error] || 'it could not be read';
+      stgSupportMsg('Nothing was restored — '+why+'.'); return;
+    }
+    // importJSON reports ok:true even when it found nothing to add (e.g. an
+    // empty or wrongly-shaped store). Never let that read as a success.
+    if(!r.added){
+      stgSupportMsg('That backup contained no jobs — nothing was restored, and nothing was changed.');
+      return;
+    }
+    if(!storeCommit()){
+      stgSupportMsg('Restored '+r.added+' job(s) in memory, but they could NOT be saved '
+                  + '(storage is read-only or full). Do not close the app — export a backup now.');
+      return;
+    }
+    stgSupportMsg('Restored — '+r.added+' job'+(r.added===1?'':'s')+' added.');
+  };
+  reader.readAsText(file);
+}
+
+// Wires the parts of the view that are rebuilt by renderSupport().
+function stgWireSupportBody(){
+  var host=document.getElementById('supBody'); if(!host) return;
+  bindCopyButtons(host);
+  var ex=document.getElementById('supExport');
+  if(ex) ex.addEventListener('click', stgExportData);
+  var rs=document.getElementById('supRestore'), f=document.getElementById('supFile');
+  if(rs && f){
+    rs.addEventListener('click', function(){ f.click(); });
+    f.addEventListener('change', stgImportData);
+  }
+  Array.prototype.forEach.call(host.querySelectorAll('[data-payopen]'), function(b){
+    b.addEventListener('click', function(){
+      window.open(b.getAttribute('data-payopen'), '_blank', 'noopener');
+    });
+  });
+  // Tab switch patches only the detail pane, so the page does not scroll back to the top.
+  Array.prototype.forEach.call(host.querySelectorAll('[data-paytab]'), function(b){
+    b.addEventListener('click', function(){
+      supportTab=b.getAttribute('data-paytab');
+      Array.prototype.forEach.call(host.querySelectorAll('[data-paytab]'), function(x){
+        x.classList.toggle('on', x.getAttribute('data-paytab')===supportTab);
+      });
+      var d=document.getElementById('payDetail');
+      if(d){ d.innerHTML=paymentDetailHtml(supportTab); bindCopyButtons(d); }
+    });
+  });
+}
+(function stgWireSupport(){
+  var b=document.getElementById('openSupport');
+  if(b) b.addEventListener('click', showSupport);
+  var back=document.getElementById('supBack');
+  if(back) back.addEventListener('click', showJobs);
 })();
 (function stgWireMigrate(){
   var go=document.getElementById('migGo'), skip=document.getElementById('migSkip'),

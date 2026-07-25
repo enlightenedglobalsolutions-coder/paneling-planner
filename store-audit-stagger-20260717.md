@@ -27,7 +27,7 @@ difference between "the code works offline" and "the app IS offline."
 ## Gate 3 — Payments (Apple 3.1.1 / Play Billing)
 | Check | Result | Evidence |
 |---|---|---|
-| No external purchase/donation links | PASS | 0 hits for stripe/paypal/btc/interac/contribute |
+| No external purchase/donation links | ACTION | **Changed 2026-07-25.** The web build now carries the standard EGS Support & Backup section (Interac + BTC live; Stripe/PayPal/Wise are inert placeholders). Set `var STAGGER_STORE_BUILD = true` in `index.html` before any Play/App Store build — it drops the entire Contribute half and keeps backup/restore, restoring this row to PASS. Re-verify with `grep -iE 'stripe\|paypal\|btc\|interac\|contribute' index.html` after flipping. Per EGS-DECISIONS.md: donation links in a store build read as circumventing Apple/Play billing. |
 | Pro unlock design | ACTION | When Pro gating is added: iOS build must use IAP (or ship paid-up-front); the Lemon Squeezy key path stays web/Android-only |
 
 ## Gate 4 — Privacy declarations
