@@ -8,7 +8,8 @@
 //     destructive; an unknown FUTURE version is read-only, never overwritten.
 //   - site measures (siteWidthIn/siteDepthIn) win over computed dims.
 //   - storage failure (quota / private mode) is reported, never silently lost.
-//   - deletes are explicit calls (UI adds confirm()); nothing deletes on its own.
+//   - deletes are explicit calls (the UI gates them behind a confirm sheet that
+//     names the target); nothing deletes on its own.
 // ============================================================================
 
 var STORE_KEY = "stagger.store.v1";

@@ -4,4 +4,7 @@ _old/
 # Backups written by egs-deploy.sh
 index.html.bak.*
 
+# Scratch theme preview — judged locally, never shipped to Pages.
+preview.html
+
 .DS_Store

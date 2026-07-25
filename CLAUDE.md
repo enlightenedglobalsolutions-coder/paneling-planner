@@ -41,6 +41,63 @@ tests *that*, so it fails if the shipped file drifts. It fails loudly with a rea
 its anchors move or the block starts touching the DOM — a harness that cannot run must not look
 like one that passes.
 
+## Themes — one token system, two palettes
+
+The whole app (main screens **and** the Jobs overlay) runs on one set of CSS custom
+properties, using the EGS house vocabulary from Notebuilt/Roadside: **surface = `--ink*`,
+text = `--paper*`, hairlines = `--line*`**. The old blue `:root` and the overlay's private
+brass block are both gone — that duplication is what made `--ink`/`--paper`/`--line`/`--ok`/
+`--warn` mean *opposite things* in the two halves of the file. Don't reintroduce a scoped
+palette.
+
+Direction is **Charcoal & Brass**: cool neutral grounds, brass reserved for accents, timber
+kept where it belongs (the plank ramp). Every text/background pair clears **WCAG 4.5:1 in both
+themes** — if you change a colour, re-check it.
+
+**Brass has two tokens and they are not interchangeable:**
+- `--brass-fill` — brass as a **fill** (buttons, pills). Stays bright `#C89A34` in *both* themes.
+- `--brass` — brass as **text** on the ground. Darkens to `#8a6410` in daylight, or it fails
+  contrast on a light background.
+- `--on-brass` — text sitting on `--brass-fill`. Near-black in both.
+- `--brass-grad` is a **gradient**: valid only as a `background`. Using it for `color`/`stroke`/
+  `border-color` silently renders nothing.
+
+Theme is stored in `stagger.theme` (`light`/`dark`/`system`, default `system`). An inline script
+in `<head>`, **before the stylesheet**, resolves the preference to an explicit `data-theme` on
+`<html>` so there is no flash of the wrong theme and CSS never needs a duplicated media-query
+palette. A `matchMedia` listener keeps `system` live.
+
+### The SVG renderers do not follow CSS
+Roughly 80 colours are painted as SVG *attributes*, so a variable swap cannot reach them.
+`refreshTokens()` reads them out of CSS once per theme change into `TOK`, and `applyTheme()`
+then calls `rerenderActive()` to redraw the visible screen. **`refreshTokens` is defined inside
+the flooring module's closure and exported via `window.refreshTokens`** — without that export
+`applyTheme`'s `typeof refreshTokens === "function"` check is false, and the layout silently
+keeps the previous theme's colours while the chrome changes around it. That failure is invisible
+unless you actually toggle the theme with a layout on screen.
+
+## Beginner mode (EGS pilot — Stagger defines this pattern)
+
+All help copy lives in **one liftable block, `STAGGER_HELP`**, keyed by the `data-help` attribute
+on each `.helpdot`. Rendered with `textContent`, never `innerHTML`. Expert mode hides every
+marker with a single rule on `:root[data-guide="expert"]` — no per-marker DOM work. Stored in
+`stagger.beginner` (`1`/`0`, default **1**). To add a marker: add the copy to `STAGGER_HELP`, then
+put `<button class="helpdot" data-help="your.key">i</button>` next to the control. Nothing else.
+
+## Settings
+
+Fifth bottom-nav tab, `#s-settings`. `switchScreen()` is data-driven off `data-screen`, so a new
+screen needs no new plumbing. Holds Appearance, Guidance, Units and **Paneling mode** — the
+Paneling/Flooring toggle that used to sit in the header. It is stored in `stagger.paneling` and
+the app boots flooring-first unless it says otherwise.
+
+## Safe-area
+
+Follows the Notebuilt idiom: `--safe-t` / `--safe-b` aliases in `:root` with a `0px` fallback,
+plus `viewport-fit=cover`. Never inline raw `env()` again. Note `#jobsOverlay .actions` — several
+views stack 2–3 of those bars, so only `:last-of-type` sticks and carries the inset; otherwise the
+gesture inset is counted two or three times.
+
 ## Service worker
 
 The live one is **`service-worker.js`** — registered in `index.html`, stamped with a dated
@@ -109,6 +166,19 @@ byte-for-byte. Three deliberate deviations from the canonical text:
 build.** `EGS-DECISIONS.md` forbids donation links in store builds (they read as circumventing
 Apple/Play billing). `true` drops the whole Contribute half and keeps backup/restore. This is why
 `store-audit-stagger-*.md` Gate 3 now reads ACTION rather than PASS.
+
+### Board estimate — mode matters
+`stgReadSetup()` reads the **paneling** inputs (`i-face`, `i-oc`, `q-*`). Those live in
+`#setup-panel`, which `setMode()` only marks `hidden` — they stay in the DOM carrying their HTML
+defaults. Reading them unconditionally meant that in flooring mode the estimate quoted 5″ face /
+24″ o.c. / 12′ stock that the user never entered, **and handed them to the truss engine via
+`v2RunSpread()`**. It now returns `{ok:false, reason}` outside paneling mode and the renderer
+prints the reason instead of a fabricated figure.
+
+Still open, filed not fixed: **a typed-sqft area cannot be estimated at all**, because
+`engineInput` is only ever built from drawn canvas geometry. The typed model exists and is
+entirely unread — `effectiveDims()` has **zero call sites** and `area.dims` is written but never
+read. The missing `dims → engineInput` converter is its own piece of work with its own harness.
 
 ### Export / restore — the contract that bites
 Export writes an envelope: `{app:'stagger', version:1, exportedAt, store:{…}}`. But

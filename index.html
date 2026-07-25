@@ -26,198 +26,300 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#042C53">
+<meta name="theme-color" content="#15181d">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.25-1011';</script>
-<title>EGS Paneling Planner</title>
+<script>window.EGS_VERSION = '2026.07.25-1249';</script>
+<title>Stagger</title>
+<script>
+/* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
+   flash of the wrong theme. Runs standalone — no dependency on the app JS. */
+(function(){
+  var pref='system';
+  try{ pref = localStorage.getItem('stagger.theme') || 'system'; }catch(e){}
+  var dark = pref==='dark' || (pref!=='light' &&
+    window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+})();
+</script>
 <style>
+  /* ===== THEME TOKENS =========================================================
+     One vocabulary for the whole app, in two themes. Names follow the EGS
+     house set used by Notebuilt/Roadside: surface = --ink*, text = --paper*.
+     The theme is resolved to an explicit data-theme by the inline script in
+     <head>, so 'system' never needs a duplicated media-query palette.
+
+     --brass      brass as TEXT on the ground  (darkens in daylight to stay legible)
+     --brass-fill brass as a FILL              (stays bright in BOTH themes)
+     --on-brass   text sitting on --brass-fill
+     Every text/background pair clears WCAG 4.5:1 in both themes.
+     ========================================================================= */
+  :root[data-theme="dark"]{
+    --ink:#15181d; --ink-2:#1d2127; --ink-3:#191d22; --stage-bg:#111419;
+    --paper:#e8eaed; --paper-dim:#a8aeb6; --paper-faint:#828891;
+    --line:#2b3138; --line-soft:#232930; --grid:#20252b; --grid-major:#2b3138;
+    --brass:#c89a34; --brass-fill:#C89A34; --brass-lite:#E6C578; --on-brass:#1a1408;
+    --brass-grad:linear-gradient(180deg,#EAC974,#C89A34);
+    --ok:#4e9d63; --ok-bg:rgba(78,157,99,.14);
+    --warn:#e0a15f; --warn-bg:rgba(224,161,95,.14);
+    --danger:#c8654a; --danger-bg:rgba(200,101,74,.14);
+    --plank-1:#C89A5F; --plank-2:#BE8E52; --plank-3:#D2A76C;
+    --plank-4:#B5854A; --plank-5:#CBA067; --plank-6:#C0925A;
+    --heat-1:#4e9d63; --heat-2:#9DBF3C; --heat-3:#EF9F27; --heat-4:#D14B2A;
+    --sheet-1:#232830; --sheet-2:#262c35; --sheet-3:#202630; --sheet-4:#2a313a; --sheet-5:#1e242c;
+    --shadow:0 8px 24px rgba(0,0,0,.5);
+  }
+  :root[data-theme="light"]{
+    --ink:#f4f5f6; --ink-2:#ffffff; --ink-3:#eef0f2; --stage-bg:#fafbfc;
+    --paper:#1c2026; --paper-dim:#5a626c; --paper-faint:#6a717a;
+    --line:#dde0e4; --line-soft:#e8eaed; --grid:#e6e9ec; --grid-major:#d5d9de;
+    --brass:#8a6410; --brass-fill:#C89A34; --brass-lite:#b8862c; --on-brass:#1a1408;
+    --brass-grad:linear-gradient(180deg,#E0B75A,#C89A34);
+    --ok:#3b6d11; --ok-bg:#eaf3de;
+    --warn:#854f0b; --warn-bg:#faeeda;
+    --danger:#a33; --danger-bg:#f7e4e1;
+    --plank-1:#B8823F; --plank-2:#A8743A; --plank-3:#C69355;
+    --plank-4:#9C6B33; --plank-5:#BE8A49; --plank-6:#AE7C40;
+    --heat-1:#3b6d11; --heat-2:#7fa32e; --heat-3:#d98a12; --heat-4:#c04020;
+    --sheet-1:#e9edf1; --sheet-2:#e3e8ee; --sheet-3:#eef2f6; --sheet-4:#dde4eb; --sheet-5:#f2f5f8;
+    --shadow:0 6px 18px rgba(20,24,30,.10);
+  }
   :root{
-    --deep:#042C53; --royal:#185FA5; --sky:#378ADD; --tint:#E6F1FB;
-    --ink:#0C447C; --paper:#FFFFFF; --bg:#F1EFE8;
-    --line:#D3D1C7; --muted:#5F5E5A; --faint:#888780; --dark:#26261f;
-    --ok:#3B6D11; --okbg:#EAF3DE; --okline:#97C459;
-    --warn:#854F0B; --warnbg:#FAEEDA; --warnline:#EF9F27;
-    --nav-h:64px;
+    --nav-h:64px; --tap:46px; --radius:12px; --radius-sm:8px;
+    --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+    --serif:Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0;height:100%}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    background:var(--bg);color:var(--dark);line-height:1.5;-webkit-font-smoothing:antialiased}
+    background:var(--ink);color:var(--paper);line-height:1.5;-webkit-font-smoothing:antialiased}
   .app{max-width:480px;margin:0 auto;min-height:100%;
-    padding-bottom:calc(var(--nav-h) + env(safe-area-inset-bottom));position:relative}
-  header.top{background:var(--deep);color:#fff;
-    padding:calc(12px + env(safe-area-inset-top)) 16px 12px;position:sticky;top:0;z-index:30}
-  header.top h1{margin:0;font-size:16px;font-weight:800;letter-spacing:.2px}
-  header.top .sub{font-size:11px;color:#9ec2e8;margin-top:2px}
-  .modebar{display:flex;background:#0a3865;border-radius:9px;padding:3px;margin-top:10px}
-  .modebar button{flex:1;padding:8px;font-size:13px;font-weight:600;border:none;
-    border-radius:7px;background:transparent;color:#9ec2e8;cursor:pointer}
-  .modebar button.on{background:var(--royal);color:#fff}
-  .modebar button.soon{opacity:.5}
+    padding-bottom:calc(var(--nav-h) + var(--safe-b));position:relative}
+  header.top{background:var(--ink-2);color:var(--paper);border-bottom:1px solid var(--line);
+    padding:calc(12px + var(--safe-t)) 16px 12px;position:sticky;top:0;z-index:30}
+  header.top h1{margin:0;font-family:var(--serif);font-size:21px;font-weight:600;letter-spacing:.01em}
+  header.top .sub{font-size:11.5px;color:var(--paper-dim);margin-top:2px}
+  /* .modebar retired — the Paneling/Flooring control lives in Settings now. */
 
   .screen{display:none;padding:16px}
   .screen.active{display:block}
-  .card{background:var(--paper);border:.5px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
-  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--faint);margin:0 0 10px;font-weight:600}
+  .card{background:var(--ink-2);border:.5px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--paper-faint);margin:0 0 10px;font-weight:600}
   .field{margin-bottom:12px}
   .field:last-child{margin-bottom:0}
-  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600}
-  .field .hint{font-size:11px;color:var(--faint);font-weight:400}
+  .field label{display:block;font-size:12px;color:var(--paper-dim);margin-bottom:4px;font-weight:600}
+  .field .hint{font-size:11px;color:var(--paper-faint);font-weight:400}
   input[type=number],input[type=text],select{width:100%;padding:11px 12px;font-size:16px;
-    border:.5px solid var(--line);border-radius:8px;background:#fff;color:var(--dark);font-family:inherit}
-  input:focus,select:focus{outline:2px solid var(--sky);outline-offset:-1px;border-color:var(--sky)}
+    border:.5px solid var(--line);border-radius:8px;background:var(--ink-3);color:var(--paper);font-family:inherit}
+  input:focus,select:focus{outline:2px solid var(--brass);outline-offset:-1px;border-color:var(--brass)}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
-  .btn{display:block;width:100%;text-align:center;background:var(--sky);color:#fff;border:none;
+  .btn{display:block;width:100%;text-align:center;background:var(--brass-fill);color:var(--on-brass);border:none;
     border-radius:9px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit}
-  .btn:active{background:var(--royal)}
-  .btn.ghost{background:var(--tint);color:var(--ink);border:.5px solid var(--royal)}
+  .btn:active{background:var(--brass-fill)}
+  .btn.ghost{background:var(--ink-3);color:var(--brass);border:.5px solid var(--brass)}
   .btnrow{display:flex;gap:10px}
   .btnrow .btn{flex:1}
 
   /* stock table */
   .stock{display:flex;flex-direction:column;gap:8px}
   .stockrow{display:flex;align-items:center;gap:10px}
-  .stockrow .len{width:52px;font-size:14px;font-weight:700;color:var(--ink)}
+  .stockrow .len{width:52px;font-size:14px;font-weight:700;color:var(--brass)}
   .stockrow input{flex:1}
-  .stockrow .qty-hint{font-size:11px;color:var(--faint);white-space:nowrap;width:64px}
+  .stockrow .qty-hint{font-size:11px;color:var(--paper-faint);white-space:nowrap;width:64px}
   .seg-toggle{display:flex;gap:6px;margin-top:2px}
   .seg-toggle button{flex:1;padding:9px;font-size:13px;font-weight:600;border:.5px solid var(--line);
-    background:#fff;color:var(--muted);border-radius:8px;cursor:pointer;font-family:inherit}
-  .seg-toggle button.on{background:var(--royal);color:#fff;border-color:var(--royal)}
+    background:var(--ink-2);color:var(--paper-dim);border-radius:8px;cursor:pointer;font-family:inherit}
+  .seg-toggle button.on{background:var(--brass-fill);color:var(--on-brass);border-color:var(--brass)}
 
-  .diagwrap{background:#fff;border:.5px solid var(--line);border-radius:10px;padding:10px;overflow:hidden}
+  .diagwrap{background:var(--ink-2);border:.5px solid var(--line);border-radius:10px;padding:10px;overflow:hidden}
   svg.dg{display:block;width:100%;height:auto}
   .optbar{display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:10px}
-  .optbar .who{font-size:12px;color:var(--muted);font-weight:600}
-  .tag{display:inline-block;background:var(--tint);color:var(--ink);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600}
+  .optbar .who{font-size:12px;color:var(--paper-dim);font-weight:600}
+  .tag{display:inline-block;background:var(--ink-3);color:var(--brass);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600}
 
-  .takeoff{background:var(--okbg);border:.5px solid var(--okline);border-radius:12px;padding:14px;margin-bottom:12px}
+  .takeoff{background:var(--ok-bg);border:.5px solid var(--ok);border-radius:12px;padding:14px;margin-bottom:12px}
   .takeoff .lbl{color:var(--ok)}
-  .takeoff .big{font-size:16px;font-weight:800;color:#27500A}
+  .takeoff .big{font-size:16px;font-weight:800;color:var(--ok)}
   .takeoff .sub{font-size:12px;color:var(--ok);margin-top:3px}
   .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .chip{background:#fff;border:.5px solid var(--okline);border-radius:20px;padding:5px 11px;font-size:12px;color:#27500A;font-weight:600}
-  .chip.warn{background:var(--warnbg);border-color:var(--warnline);color:var(--warn)}
+  .chip{background:var(--ink-2);border:.5px solid var(--ok);border-radius:20px;padding:5px 11px;font-size:12px;color:var(--ok);font-weight:600}
+  .chip.warn{background:var(--warn-bg);border-color:var(--warn);color:var(--warn)}
 
-  .alert{background:var(--warnbg);border:.5px solid var(--warnline);border-radius:12px;padding:14px;margin-bottom:12px}
+  .alert{background:var(--warn-bg);border:.5px solid var(--warn);border-radius:12px;padding:14px;margin-bottom:12px}
   .alert .lbl{color:var(--warn)}
   .alert .msg{font-size:14px;color:var(--warn);font-weight:600}
 
-  .cutlist .r{display:flex;justify-content:space-between;align-items:center;padding:9px 2px;border-bottom:.5px solid #E4E2DA;font-size:14px}
+  .cutlist .r{display:flex;justify-content:space-between;align-items:center;padding:9px 2px;border-bottom:.5px solid var(--line);font-size:14px}
   .cutlist .r:last-child{border-bottom:none}
-  .cutlist .rn{color:var(--faint);font-weight:700;font-size:12px;min-width:52px}
-  .cutlist .seg{color:var(--dark);text-align:right;flex:1}
-  .flag{color:var(--warn);font-size:10px;background:var(--warnbg);border-radius:4px;padding:1px 6px;margin-left:6px;white-space:nowrap;font-weight:600}
-  .stocktag{font-size:10px;color:var(--ink);background:var(--tint);border-radius:4px;padding:1px 6px;margin-left:6px;font-weight:600}
+  .cutlist .rn{color:var(--paper-faint);font-weight:700;font-size:12px;min-width:52px}
+  .cutlist .seg{color:var(--paper);text-align:right;flex:1}
+  .flag{color:var(--warn);font-size:10px;background:var(--warn-bg);border-radius:4px;padding:1px 6px;margin-left:6px;white-space:nowrap;font-weight:600}
+  .stocktag{font-size:10px;color:var(--brass);background:var(--ink-3);border-radius:4px;padding:1px 6px;margin-left:6px;font-weight:600}
 
-  .empty{text-align:center;color:var(--faint);font-size:14px;padding:30px 16px;line-height:1.6}
-  .empty b{color:var(--muted)}
+  .empty{text-align:center;color:var(--paper-faint);font-size:14px;padding:30px 16px;line-height:1.6}
+  .empty b{color:var(--paper-dim)}
 
-  nav.bottom{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:.5px solid var(--line);
-    display:flex;z-index:40;padding-bottom:env(safe-area-inset-bottom);max-width:480px;margin:0 auto}
-  nav.bottom button{flex:1;background:none;border:none;padding:9px 4px 8px;font-size:10.5px;color:var(--faint);cursor:pointer;font-family:inherit;font-weight:600}
+  nav.bottom{position:fixed;left:0;right:0;bottom:0;background:var(--ink-2);border-top:.5px solid var(--line);
+    display:flex;z-index:40;padding-bottom:var(--safe-b);min-height:calc(var(--nav-h) + var(--safe-b));
+    max-width:480px;margin:0 auto}
+  nav.bottom button{flex:1;background:none;border:none;padding:9px 4px 8px;font-size:10.5px;color:var(--paper-faint);cursor:pointer;font-family:inherit;font-weight:600}
   nav.bottom button .ic{display:block;font-size:19px;line-height:1;margin-bottom:3px}
-  nav.bottom button.on{color:var(--royal)}
-  .foot{font-size:10px;color:var(--faint);text-align:center;padding:4px 0 2px}
+  nav.bottom button.on{color:var(--brass)}
+  .foot{font-size:10px;color:var(--paper-faint);text-align:center;padding:4px 0 2px}
 
-  .echo{display:block;font-size:10px;color:var(--royal);margin-top:2px;min-height:12px}
-  .echo.bad{color:#a33}
+  .echo{display:block;font-size:10px;color:var(--brass);margin-top:2px;min-height:12px}
+
+  /* ---- Settings controls ---- */
+  .segrow{display:flex;gap:6px}
+  .segrow .seg{flex:1;min-height:var(--tap);padding:10px 8px;font-size:13.5px;font-weight:600;
+    font-family:inherit;border:1px solid var(--line);border-radius:var(--radius-sm);
+    background:var(--ink-3);color:var(--paper-dim);cursor:pointer}
+  .segrow .seg.on{background:var(--brass-fill);color:var(--on-brass);border-color:var(--brass-fill)}
+  .setrow{display:flex;align-items:center;gap:14px}
+  .setrow-lab{flex:1;font-size:13px;color:var(--paper);line-height:1.5}
+  .setrow-lab .hint{font-size:11.5px;color:var(--paper-faint)}
+  .switch{flex:0 0 52px;width:52px;height:31px;border-radius:16px;border:1px solid var(--line);
+    background:var(--ink-3);position:relative;cursor:pointer;padding:0;transition:background .15s ease}
+  .switch .knob{position:absolute;top:2px;left:2px;width:25px;height:25px;border-radius:50%;
+    background:var(--paper-dim);transition:transform .15s ease,background .15s ease}
+  .switch[aria-checked="true"]{background:var(--brass-fill);border-color:var(--brass-fill)}
+  .switch[aria-checked="true"] .knob{transform:translateX(21px);background:var(--on-brass)}
+
+  /* ---- Beginner markers (EGS pilot) ----
+     Expert mode hides every marker with one rule on the root — no per-marker
+     DOM work, and the popover closes itself because its host disappears. */
+  .helpdot{flex:0 0 17px;width:17px;height:17px;border-radius:50%;border:1px solid var(--brass);
+    background:transparent;color:var(--brass);font-size:11px;font-weight:800;font-style:italic;
+    font-family:var(--serif);display:inline-flex;align-items:center;justify-content:center;
+    cursor:pointer;padding:0;line-height:1}
+  .helpdot:active{background:var(--brass-fill);color:var(--on-brass)}
+  :root[data-guide="expert"] .helpdot{display:none}
+  .helpbox{background:var(--ink-3);border:1px solid var(--brass);border-radius:10px;
+    padding:11px 13px;font-size:12.5px;line-height:1.6;color:var(--paper-dim);margin:0 0 12px}
+  .helpbox[hidden]{display:none}
+
+  /* ---- Themed bottom sheet (material picker + delete confirmations) ---- */
+  .stgSheetWrap{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.55);
+    display:flex;align-items:flex-end;justify-content:center}
+  #jobsOverlay .stgSheet{width:100%;max-width:480px;background:var(--ink-2);color:var(--paper);
+    border-top-left-radius:20px;border-top-right-radius:20px;
+    border:1px solid var(--line);border-bottom:none;
+    padding:20px 18px calc(18px + var(--safe-b));max-height:88vh;overflow-y:auto;
+    font-family:var(--sans)}
+  #jobsOverlay .stgSheetTitle{font-family:var(--serif);font-size:20px;font-weight:600;margin-bottom:10px}
+  #jobsOverlay .stgSheetSubject{background:var(--ink-3);border:1px solid var(--line);border-radius:12px;
+    padding:11px 13px;margin-bottom:12px}
+  #jobsOverlay .stgSheetSubject .nm{font-size:15px;font-weight:700;color:var(--paper);word-break:break-word}
+  #jobsOverlay .stgSheetSubject .dt{font-size:12.5px;color:var(--paper-dim);margin-top:3px}
+  #jobsOverlay .stgSheetBody{font-size:13.5px;line-height:1.6;color:var(--paper-dim);margin-bottom:14px}
+  #jobsOverlay .stgSheetOpts{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}
+  #jobsOverlay .stgSheetOpt{width:100%;text-align:left;min-height:var(--tap);padding:12px 14px;
+    font:inherit;font-size:14.5px;border:1px solid var(--line);border-radius:var(--radius-sm);
+    background:var(--ink-3);color:var(--paper);cursor:pointer}
+  #jobsOverlay .stgSheetOpt.on{background:var(--brass-fill);color:var(--on-brass);border-color:var(--brass-fill);font-weight:700}
+  #jobsOverlay .stgSheetRow{display:flex;gap:10px}
+  #jobsOverlay .stgSheetBtn{flex:1;min-height:var(--tap);padding:13px;font:inherit;font-size:15px;font-weight:700;
+    border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--ink-3);
+    color:var(--paper);cursor:pointer}
+  #jobsOverlay .stgSheetBtn.danger{background:var(--danger);border-color:var(--danger);color:var(--ink-2)}
+  .echo.bad{color:var(--danger)}
 
   /* ===== FLOORING MODULE CSS START ===== */
-  .fl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--paper);
+  .fl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--ink-2);
     border:.5px solid var(--line);border-radius:8px;padding:8px}
   .fl-scroll svg{display:block;height:auto;min-width:640px}
-  .fl-hint{font-size:10px;color:var(--faint);text-align:center;padding:5px 0 0}
+  .fl-hint{font-size:10px;color:var(--paper-faint);text-align:center;padding:5px 0 0}
   .fl-stats{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
-  .fl-stat{flex:1 1 44%;background:var(--tint);border:.5px solid var(--line);
+  .fl-stat{flex:1 1 44%;background:var(--ink-3);border:.5px solid var(--line);
     border-radius:7px;padding:7px 9px}
-  .fl-stat b{display:block;font-size:15px;color:var(--ink);line-height:1.25}
-  .fl-stat span{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;
+  .fl-stat b{display:block;font-size:15px;color:var(--brass);line-height:1.25}
+  .fl-stat span{display:block;font-size:10px;color:var(--paper-dim);text-transform:uppercase;
     letter-spacing:.04em;margin-top:1px}
   .fl-row{display:flex;gap:8px;align-items:flex-start;padding:8px 0;
     border-bottom:.5px solid var(--line)}
   .fl-row:last-child{border-bottom:none}
-  .fl-rn{flex:0 0 30px;font-weight:700;color:var(--royal);font-size:13px;padding-top:1px}
+  .fl-rn{flex:0 0 30px;font-weight:700;color:var(--brass);font-size:13px;padding-top:1px}
   .fl-rb{flex:1;min-width:0}
-  .fl-cuts{font-size:13px;color:var(--dark);word-break:break-word}
-  .fl-note{font-size:11px;color:var(--muted);margin-top:2px}
+  .fl-cuts{font-size:13px;color:var(--paper);word-break:break-word}
+  .fl-note{font-size:11px;color:var(--paper-dim);margin-top:2px}
   .fl-tag{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;
     border-radius:4px;margin-top:3px}
-  .fl-tag.reuse{background:var(--okbg);color:var(--ok);border:.5px solid var(--okline)}
-  .fl-tag.relax{background:var(--warnbg);color:var(--warn);border:.5px solid var(--warnline)}
+  .fl-tag.reuse{background:var(--ok-bg);color:var(--ok);border:.5px solid var(--ok)}
+  .fl-tag.relax{background:var(--warn-bg);color:var(--warn);border:.5px solid var(--warn)}
   .fl-check{display:flex;gap:7px;align-items:center;font-size:12px;padding:5px 0}
   .fl-check .dot{flex:0 0 8px;height:8px;border-radius:50%}
-  .fl-check .dot.ok{background:var(--okline)}
-  .fl-check .dot.no{background:var(--warnline)}
+  .fl-check .dot.ok{background:var(--ok)}
+  .fl-check .dot.no{background:var(--warn)}
   .fl-boxes{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
   .fl-box{font-size:11px;font-weight:600;padding:3px 8px;border-radius:5px;
-    background:var(--tint);color:var(--ink);border:.5px solid var(--line)}
+    background:var(--ink-3);color:var(--brass);border:.5px solid var(--line)}
 
   /* view switcher */
   .fl-views{display:flex;gap:5px;overflow-x:auto;-webkit-overflow-scrolling:touch;
     padding:0 0 9px;margin:0 -1px}
   .fl-chip{flex:0 0 auto;font-family:inherit;font-size:11.5px;font-weight:600;
     padding:6px 11px;border-radius:15px;border:.5px solid var(--line);
-    background:var(--paper);color:var(--muted);cursor:pointer;white-space:nowrap}
-  .fl-chip.on{background:var(--royal);border-color:var(--royal);color:#fff}
-  .fl-legend{display:flex;flex-wrap:wrap;gap:9px;margin-top:8px;font-size:11px;color:var(--muted)}
+    background:var(--ink-2);color:var(--paper-dim);cursor:pointer;white-space:nowrap}
+  .fl-chip.on{background:var(--brass-fill);border-color:var(--brass);color:var(--on-brass)}
+  .fl-legend{display:flex;flex-wrap:wrap;gap:9px;margin-top:8px;font-size:11px;color:var(--paper-dim)}
   .fl-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;
     margin-right:4px;vertical-align:middle;font-style:normal}
   .fl-expand{width:100%;margin-top:9px;font-family:inherit;font-size:13px;font-weight:600;
-    padding:11px;border-radius:8px;border:.5px solid var(--royal);
-    background:var(--tint);color:var(--ink);cursor:pointer}
+    padding:11px;border-radius:8px;border:.5px solid var(--brass);
+    background:var(--ink-3);color:var(--brass);cursor:pointer}
 
   /* install progress */
   .fl-prog{margin-top:11px}
   .fl-prog-top{display:flex;justify-content:space-between;font-size:11px;
-    color:var(--muted);margin-bottom:4px}
+    color:var(--paper-dim);margin-bottom:4px}
   .fl-prog-bar{height:7px;border-radius:4px;background:var(--line);overflow:hidden}
-  .fl-prog-fill{height:100%;background:var(--okline);width:0}
+  .fl-prog-fill{height:100%;background:var(--ok);width:0}
 
   /* install rows */
-  .fl-row.now{background:var(--warnbg);border-left:3px solid var(--warnline);
+  .fl-row.now{background:var(--warn-bg);border-left:3px solid var(--warn);
     margin-left:-10px;padding-left:9px;border-radius:5px}
   .fl-row.done{opacity:.45}
   .fl-row.done .fl-cuts{text-decoration:line-through}
   .fl-rn.tick{color:var(--ok)}
   .fl-done-btn{width:100%;margin-top:9px;font-family:inherit;font-size:14px;font-weight:700;
-    padding:13px;border-radius:8px;border:none;background:var(--ok);color:#fff;cursor:pointer}
+    padding:13px;border-radius:8px;border:none;background:var(--ok);color:var(--ink-2);cursor:pointer}
   .fl-undo-btn{width:100%;margin-top:6px;font-family:inherit;font-size:12px;font-weight:600;
     padding:9px;border-radius:8px;border:.5px solid var(--line);
-    background:var(--paper);color:var(--muted);cursor:pointer}
+    background:var(--ink-2);color:var(--paper-dim);cursor:pointer}
   .fl-clear-btn{width:100%;margin-top:6px;font-family:inherit;font-size:12px;font-weight:600;
-    padding:9px;border-radius:8px;border:.5px solid var(--warnline);
-    background:var(--warnbg);color:var(--warn);cursor:pointer}
+    padding:9px;border-radius:8px;border:.5px solid var(--warn);
+    background:var(--warn-bg);color:var(--warn);cursor:pointer}
 
   /* fullscreen overlay */
-  .fl-ov{position:fixed;top:0;left:0;right:0;bottom:0;z-index:80;background:var(--bg);
+  .fl-ov{position:fixed;top:0;left:0;right:0;bottom:0;z-index:80;background:var(--ink);
     display:none;flex-direction:column}
   .fl-ov.on{display:flex}
   .fl-ov-bar{flex:0 0 auto;display:flex;gap:5px;align-items:center;padding:8px;
-    padding-top:calc(8px + env(safe-area-inset-top));background:var(--paper);
+    padding-top:calc(8px + var(--safe-t));background:var(--ink-2);
     border-bottom:.5px solid var(--line);overflow-x:auto}
   .fl-ov-bar button{flex:0 0 auto;font-family:inherit;font-size:12px;font-weight:600;
     padding:8px 11px;border-radius:7px;border:.5px solid var(--line);
-    background:var(--paper);color:var(--ink);cursor:pointer;min-height:40px;white-space:nowrap}
-  .fl-ov-bar button.close{background:var(--royal);border-color:var(--royal);color:#fff}
-  .fl-ov-bar button.on{background:var(--royal);border-color:var(--royal);color:#fff}
-  .fl-ov-stage{flex:1;overflow:hidden;position:relative;touch-action:none;background:#EAE8E0}
+    background:var(--ink-2);color:var(--brass);cursor:pointer;min-height:40px;white-space:nowrap}
+  .fl-ov-bar button.close{background:var(--brass-fill);border-color:var(--brass);color:var(--on-brass)}
+  .fl-ov-bar button.on{background:var(--brass-fill);border-color:var(--brass);color:var(--on-brass)}
+  .fl-ov-stage{flex:1;overflow:hidden;position:relative;touch-action:none;background:var(--stage-bg)}
   .fl-ov-stage svg{position:absolute;top:0;left:0;transform-origin:0 0}
   .fl-ov-foot{flex:0 0 auto;padding:9px 10px;
-    padding-bottom:calc(9px + env(safe-area-inset-bottom));
-    background:var(--paper);border-top:.5px solid var(--line);
-    font-size:11.5px;color:var(--muted);text-align:center}
+    padding-bottom:calc(9px + var(--safe-b));
+    background:var(--ink-2);border-top:.5px solid var(--line);
+    font-size:11.5px;color:var(--paper-dim);text-align:center}
   /* ===== FLOORING MODULE CSS END ===== */
 
   @media print{
     header.top,nav.bottom,.modebar,.btn,.optbar,.diagwrap,
     .fl-ov,.fl-views,.fl-expand,.fl-done-btn,.fl-undo-btn,.fl-clear-btn{display:none !important}
     .screen{display:block !important;padding:0}
-    body{background:#fff}
+    body{background:var(--ink-2)}
     .card,.takeoff{border:none;padding:4px 0}
     .print-title{display:block !important}
   }
@@ -227,31 +329,36 @@
 #jobsOverlay{position:fixed;inset:0;z-index:9000;overflow:auto;-webkit-overflow-scrolling:touch;}
 #jobsOverlay[hidden]{display:none;}
 #jobsOverlay .jobsOverlayInner{min-height:100%;position:relative;}
-#jobsOverlay .jobsClose{position:fixed;top:10px;right:12px;z-index:9100;width:40px;height:40px;border-radius:12px;border:1px solid rgba(214,168,75,.30);background:#1d150d;color:#EAC974;font-size:20px;line-height:1;cursor:pointer;}
-#jobsOverlay .stgRecovered{margin:56px 14px 0;padding:10px 12px;border-radius:10px;background:#3a2a12;border:1px solid rgba(214,168,75,.35);color:#f0dca0;font-size:14px;}
+/* The glyph used to sit low and left: the button inherited padding:13px 16px
+   from #jobsOverlay button and never reset it, collapsing the content box to
+   6x12px, with no flex centring and a line-height:1 strut fighting a fallback
+   font. padding:0 + flex centring + a glyph that exists in the primary face. */
+#jobsOverlay .jobsClose{position:fixed;top:calc(10px + var(--safe-t));right:12px;z-index:9100;
+  width:40px;height:40px;padding:0;border-radius:12px;border:1px solid var(--line);
+  background:var(--ink-3);color:var(--brass);font-size:22px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;}
+#jobsOverlay .stgRecovered{margin:56px 14px 0;padding:10px 12px;border-radius:10px;background:var(--warn-bg);border:1px solid rgba(214,168,75,.35);color:var(--warn);font-size:14px;}
 #jobsOverlay .stgRecovered[hidden]{display:none;}
-#openJobs{margin-top:8px;display:inline-block;padding:8px 16px;border-radius:10px;border:1px solid rgba(214,168,75,.35);background:linear-gradient(180deg,#EAC974,#C89A34);color:#2a1e08;font-weight:700;font-size:15px;cursor:pointer;}
+#openJobs{margin-top:10px;display:inline-block;padding:9px 16px;border-radius:var(--radius-sm);
+  border:none;background:var(--brass-grad);color:var(--on-brass);font-weight:700;font-size:15px;
+  font-family:inherit;min-height:var(--tap);cursor:pointer;}
 #jobsOverlay .stgBoardEst{margin-top:12px;padding-top:12px;border-top:1px solid rgba(214,168,75,.20);}
-#jobsOverlay .stgBoardEst .stgsub{font-weight:400;color:#b49e7e;font-size:12px;}
+#jobsOverlay .stgBoardEst .stgsub{font-weight:400;color:var(--paper-dim);font-size:12px;}
 #jobsOverlay .stgArea{margin:10px 0;}
-#jobsOverlay .stgAreaName{font-size:13px;color:#efe4d1;margin-bottom:4px;}
+#jobsOverlay .stgAreaName{font-size:13px;color:var(--paper);margin-bottom:4px;}
 #jobsOverlay .stgTbl{width:100%;border-collapse:collapse;font-size:13px;}
-#jobsOverlay .stgTbl th{text-align:left;color:#b49e7e;font-weight:600;padding:2px 6px;border-bottom:1px solid rgba(214,168,75,.15);}
-#jobsOverlay .stgTbl td{padding:3px 6px;color:#efe4d1;}
-#jobsOverlay .stgTbl tr.best td{background:rgba(234,201,116,.14);color:#F2DD6E;font-weight:700;}
-#jobsOverlay .stgTbl tr.no td{color:#b49e7e;font-style:italic;}
-#jobsOverlay .stgShop{margin-top:10px;padding:10px 12px;border-radius:10px;background:#1d150d;border:1px solid rgba(214,168,75,.25);display:flex;flex-direction:column;gap:3px;}
-#jobsOverlay .stgShop .lab{font-size:12px;color:#b49e7e;}
-#jobsOverlay .stgShop .val{font-size:16px;color:#F2DD6E;font-weight:700;}
-#jobsOverlay {
-  --ink:#17110a; --panel:#221913; --panel2:#1d150d; --line:#3a2e1d;
-  --blue:#C89A34; --blueL:#E6C578; --gold:#E6C578; --goldL:#EFD79A;
-  --paper:#efe4d1; --dim:#b49e7e; --ok:#4e9d63; --warn:#e0a15f;
-  --brass:linear-gradient(180deg,#EAC974,#C89A34);
-}
+#jobsOverlay .stgTbl th{text-align:left;color:var(--paper-dim);font-weight:600;padding:2px 6px;border-bottom:1px solid rgba(214,168,75,.15);}
+#jobsOverlay .stgTbl td{padding:3px 6px;color:var(--paper);}
+#jobsOverlay .stgTbl tr.best td{background:rgba(234,201,116,.14);color:var(--brass-lite);font-weight:700;}
+#jobsOverlay .stgTbl tr.no td{color:var(--paper-dim);font-style:italic;}
+#jobsOverlay .stgShop{margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--ink-3);border:1px solid rgba(214,168,75,.25);display:flex;flex-direction:column;gap:3px;}
+#jobsOverlay .stgShop .lab{font-size:12px;color:var(--paper-dim);}
+#jobsOverlay .stgShop .val{font-size:16px;color:var(--brass-lite);font-weight:700;}
+/* The overlay no longer carries a private palette — it inherits the app
+   tokens above. Its --ink/--paper/--line semantics already matched. */
 #jobsOverlay * {box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 #jobsOverlay, #jobsOverlay {margin:0}
-#jobsOverlay {background:linear-gradient(180deg,#1d150c,#120c06 60%) fixed;color:var(--paper);
+#jobsOverlay {background:var(--ink);color:var(--paper);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   font-size:16px;line-height:1.5;-webkit-user-select:none;user-select:none}
 #jobsOverlay .view {display:none;min-height:100dvh;flex-direction:column}
@@ -259,142 +366,148 @@
 #jobsOverlay #viewDraw.on {display:block}
 #jobsOverlay header {padding:18px 18px 6px}
 #jobsOverlay h1 {font-family:Georgia,"Times New Roman",serif;font-size:23px;font-weight:600;margin:0;letter-spacing:.01em}
-#jobsOverlay .eyebrow {font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);font-weight:700;margin:0 0 2px}
-#jobsOverlay .guide {color:#cbbfa9;font-size:14px;padding:2px 18px 0}
+#jobsOverlay .eyebrow {font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--brass);font-weight:700;margin:0 0 2px}
+#jobsOverlay .guide {color:var(--paper-dim);font-size:14px;padding:2px 18px 0}
 #jobsOverlay /* ---- shape picker ---- */
 .cards {display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px 18px 22px}
-#jobsOverlay .card {background:var(--panel);border:1px solid rgba(214,168,75,.14);border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,.5);
+#jobsOverlay .card {background:var(--ink-2);border:1px solid rgba(214,168,75,.14);border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,.5);
   padding:16px 14px 14px;display:flex;flex-direction:column;align-items:center;gap:10px;
   cursor:pointer;transition:border-color .12s,transform .05s}
-#jobsOverlay .card:active {transform:scale(.98);border-color:var(--gold)}
+#jobsOverlay .card:active {transform:scale(.98);border-color:var(--brass)}
 #jobsOverlay .card svg {width:74px;height:74px;display:block}
 #jobsOverlay .card .lbl {font-size:15px;font-weight:600}
 #jobsOverlay .card.custom {grid-column:1 / -1;flex-direction:row;justify-content:center;gap:14px;
-  background:var(--panel2);border-style:dashed}
+  background:var(--ink-3);border-style:dashed}
 #jobsOverlay .card.custom svg {width:40px;height:40px}
-#jobsOverlay .shp {fill:rgba(214,168,75,.16);stroke:var(--gold);stroke-width:3;stroke-linejoin:round}
+#jobsOverlay .shp {fill:rgba(214,168,75,.16);stroke:var(--brass);stroke-width:3;stroke-linejoin:round}
 #jobsOverlay /* ---- draw canvas ---- */
 .topbar {display:flex;align-items:center;gap:10px;padding:12px 14px;
   position:sticky;top:0;z-index:5;background:var(--ink)}
 #jobsOverlay .topbar .name {font-weight:700}
 #jobsOverlay .topbar .collapse {margin-left:auto;padding:8px 12px}
-#jobsOverlay .stage {position:relative;height:58vh;min-height:0;margin:2px 12px 0;background:#120c06;
+#jobsOverlay .stage {position:relative;height:58vh;min-height:0;margin:2px 12px 0;background:var(--stage-bg);
   border:1px solid var(--line);border-radius:14px;overflow:hidden;touch-action:none;transition:height .18s ease}
 #jobsOverlay .stage.collapsed {height:54px;touch-action:auto}
 #jobsOverlay .stage.collapsed #svg, #jobsOverlay .stage.collapsed .zoombar, #jobsOverlay .stage.collapsed .emptyhint {display:none}
 #jobsOverlay .collapsedLabel {position:absolute;inset:0;display:none;align-items:center;justify-content:center;
-  color:var(--dim);font-size:14px;text-align:center;padding:0 20px}
+  color:var(--paper-dim);font-size:14px;text-align:center;padding:0 20px}
 #jobsOverlay .stage.collapsed .collapsedLabel {display:flex}
 #jobsOverlay #svg {width:100%;height:100%;display:block;touch-action:none}
-#jobsOverlay .gridline {stroke:#251b10;stroke-width:1}
-#jobsOverlay .gridline.major {stroke:#312516}
-#jobsOverlay .rk {fill:rgba(214,168,75,.22);stroke:var(--gold);stroke-width:2}
-#jobsOverlay .rk.sel {fill:rgba(214,168,75,.34);stroke:#fff;stroke-width:2.5}
-#jobsOverlay .rk.ghost {fill:rgba(214,168,75,.18);stroke:var(--goldL);stroke-dasharray:6 5}
-#jobsOverlay .outline {fill:none;stroke:#f3ead6;stroke-width:3;stroke-linejoin:round}
-#jobsOverlay .handle {fill:#fff;stroke:var(--blue);stroke-width:2.5}
+#jobsOverlay .gridline {stroke:var(--grid);stroke-width:1}
+#jobsOverlay .gridline.major {stroke:var(--grid-major)}
+#jobsOverlay .rk {fill:rgba(214,168,75,.22);stroke:var(--brass);stroke-width:2}
+#jobsOverlay .rk.sel {fill:rgba(214,168,75,.34);stroke:var(--paper);stroke-width:2.5}
+#jobsOverlay .rk.ghost {fill:rgba(214,168,75,.18);stroke:var(--brass-lite);stroke-dasharray:6 5}
+#jobsOverlay .outline {fill:none;stroke:var(--paper);stroke-width:3;stroke-linejoin:round}
+#jobsOverlay .handle {fill:var(--paper);stroke:var(--brass);stroke-width:2.5}
 #jobsOverlay .emptyhint {position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  text-align:center;padding:0 40px;color:var(--dim);font-size:16px;pointer-events:none}
+  text-align:center;padding:0 40px;color:var(--paper-dim);font-size:16px;pointer-events:none}
 #jobsOverlay .zoombar {position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:8px}
 #jobsOverlay .zoombar button {width:44px;height:44px;font-size:22px;padding:0;border-radius:12px;
   background:rgba(34,25,19,.92)}
-#jobsOverlay .status {padding:8px 18px 2px;font-size:13.5px;color:var(--dim);min-height:20px}
+#jobsOverlay .status {padding:8px 18px 2px;font-size:13.5px;color:var(--paper-dim);min-height:20px}
 #jobsOverlay .status.ok {color:var(--ok)}
 #jobsOverlay .status.warn {color:var(--warn)}
-#jobsOverlay .actions {display:flex;gap:10px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));
-  position:sticky;bottom:0;z-index:5;background:var(--ink);border-top:1px solid var(--line)}
+/* Several views stack 2-3 .actions bars. If every one is sticky and every one
+   pads by --safe-b, the gesture inset is counted 2-3x and they all fight for
+   bottom:0. Only the LAST bar in a view sticks and carries the inset. */
+#jobsOverlay .actions {display:flex;gap:10px;padding:12px 14px 8px;
+  background:var(--ink);border-top:1px solid var(--line)}
+#jobsOverlay .actions ~ .actions {border-top:none;padding-top:0}
+#jobsOverlay .view > .actions:last-of-type {
+  position:sticky;bottom:0;z-index:5;padding-bottom:calc(14px + var(--safe-b))}
 #jobsOverlay /* ---- measure ---- */
 .mwrap {padding:8px 18px 0}
-#jobsOverlay .mdiagram {background:#120c06;border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:14px}
+#jobsOverlay .mdiagram {background:var(--stage-bg);border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:14px}
 #jobsOverlay .mdiagram svg {width:100%;height:auto;display:block}
-#jobsOverlay .sideedge {stroke:var(--gold);stroke-width:4;stroke-linecap:round}
-#jobsOverlay .sidenum {fill:#241a08;font-weight:700;font-size:15px}
-#jobsOverlay .sidebadge {fill:var(--gold)}
-#jobsOverlay .sidebadge.done {fill:#C89A34}
-#jobsOverlay .unittoggle {display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:3px;margin:0 18px 12px;gap:3px}
-#jobsOverlay .unittoggle button {border:none;background:transparent;color:var(--dim);padding:8px 18px;border-radius:9px;font-size:14px;font-weight:600}
-#jobsOverlay .unittoggle button.on {background:var(--brass);color:#241a08}
+#jobsOverlay .sideedge {stroke:var(--brass);stroke-width:4;stroke-linecap:round}
+#jobsOverlay .sidenum {fill:var(--on-brass);font-weight:700;font-size:15px}
+#jobsOverlay .sidebadge {fill:var(--brass)}
+#jobsOverlay .sidebadge.done {fill:var(--brass)}
+#jobsOverlay .unittoggle {display:inline-flex;background:var(--ink-3);border:1px solid var(--line);border-radius:12px;padding:3px;margin:0 18px 12px;gap:3px}
+#jobsOverlay .unittoggle button {border:none;background:transparent;color:var(--paper-dim);padding:8px 18px;border-radius:9px;font-size:14px;font-weight:600}
+#jobsOverlay .unittoggle button.on {background:var(--brass-grad);color:var(--on-brass)}
 #jobsOverlay .slist {padding:0 18px}
-#jobsOverlay .srow {padding:9px 0;border-bottom:1px solid #2a2013}
+#jobsOverlay .srow {padding:9px 0;border-bottom:1px solid var(--line-soft)}
 #jobsOverlay .srow .head {display:flex;align-items:center;gap:10px;margin-bottom:7px}
-#jobsOverlay .snum {width:28px;height:28px;flex:none;border-radius:50%;background:var(--brass);color:#241a08;
+#jobsOverlay .snum {width:28px;height:28px;flex:none;border-radius:50%;background:var(--brass-grad);color:var(--on-brass);
   box-shadow:0 1px 4px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.35);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
 #jobsOverlay .srow.done .snum {font-size:0;box-shadow:inset 0 1px 3px rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.3)}
-#jobsOverlay .srow.done .snum::after {content:"\2713";font-size:16px;font-weight:800;color:#241a08}
-#jobsOverlay .slabel {flex:1;color:#cbbfa9;font-size:14px}
-#jobsOverlay .slabel .dir {color:#8a7a5f}
+#jobsOverlay .srow.done .snum::after {content:"\2713";font-size:16px;font-weight:800;color:var(--on-brass)}
+#jobsOverlay .slabel {flex:1;color:var(--paper-dim);font-size:14px}
+#jobsOverlay .slabel .dir {color:var(--paper-faint)}
 #jobsOverlay /* EGS measurement widget (meas_widget.js) */
 .meas {display:flex;gap:9px;padding-left:40px}
 #jobsOverlay .meas-cell {display:flex;flex-direction:column;align-items:center;gap:3px}
-#jobsOverlay .meas-box, #jobsOverlay .meas .input {width:60px;height:22px;background:var(--panel2);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);
+#jobsOverlay .meas-box, #jobsOverlay .meas .input {width:60px;height:22px;background:var(--ink-3);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);
   border-radius:11px;padding:0 6px;font-size:16px;text-align:center;box-shadow:inset 0 1px 2px rgba(0,0,0,.4);-webkit-user-select:text;user-select:text}
-#jobsOverlay .meas-box:focus, #jobsOverlay .meas .input:focus {border-color:var(--gold);outline:none;box-shadow:0 0 0 3px rgba(230,197,120,.20)}
-#jobsOverlay .meas-cell label {font-size:11px;color:var(--dim);letter-spacing:.03em}
+#jobsOverlay .meas-box:focus, #jobsOverlay .meas .input:focus {border-color:var(--brass);outline:none;box-shadow:0 0 0 3px rgba(230,197,120,.20)}
+#jobsOverlay .meas-cell label {font-size:11px;color:var(--paper-dim);letter-spacing:.03em}
 #jobsOverlay .srow.done .meas-box {border-color:rgba(230,197,120,.45)}
-#jobsOverlay .result {margin:16px 18px 0;background:linear-gradient(180deg,#2a1f12,#1a130b);
+#jobsOverlay .result {margin:16px 18px 0;background:var(--ink-2);
   border:1px solid rgba(214,168,75,.35);border-radius:16px;padding:16px 18px;display:none}
 #jobsOverlay .result.on {display:block}
-#jobsOverlay .result .big {font-family:Georgia,"Times New Roman",serif;font-size:36px;font-weight:600;color:#f3ead6;letter-spacing:.01em}
-#jobsOverlay .result .unit2 {font-size:16px;color:var(--gold);font-weight:600}
-#jobsOverlay .result .sub {color:var(--dim);font-size:14px;margin-top:4px}
+#jobsOverlay .result .big {font-family:Georgia,"Times New Roman",serif;font-size:36px;font-weight:600;color:var(--paper);letter-spacing:.01em}
+#jobsOverlay .result .unit2 {font-size:16px;color:var(--brass);font-weight:600}
+#jobsOverlay .result .sub {color:var(--paper-dim);font-size:14px;margin-top:4px}
 #jobsOverlay .result .note {color:var(--warn);font-size:13px;margin-top:8px}
-#jobsOverlay .engineout {margin-top:14px;border-top:1px solid rgba(214,168,75,.14);padding-top:12px;font-size:13.5px;color:#cbbfa9}
-#jobsOverlay .engineout h4 {margin:10px 0 4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
+#jobsOverlay .engineout {margin-top:14px;border-top:1px solid rgba(214,168,75,.14);padding-top:12px;font-size:13.5px;color:var(--paper-dim)}
+#jobsOverlay .engineout h4 {margin:10px 0 4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--brass)}
 #jobsOverlay .engineout .row {display:flex;justify-content:space-between;gap:10px;padding:3px 0}
-#jobsOverlay .engineout .k {color:var(--dim)}
+#jobsOverlay .engineout .k {color:var(--paper-dim)}
 #jobsOverlay .engineout .runline {display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
 #jobsOverlay .engineout .runline button {padding:6px 11px;font-size:12.5px}
 #jobsOverlay .engineout .warn {color:var(--warn);font-size:12.5px;margin-top:6px}
 #jobsOverlay .doneMsg {margin:10px 18px 0;color:var(--ok);font-weight:600;font-size:14px;min-height:18px}
-#jobsOverlay .sideinput {margin:0 18px 6px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:66px}
-#jobsOverlay .sihint {color:var(--dim);font-size:14px;text-align:center;padding:9px 4px}
-#jobsOverlay .sititle {font-size:13.5px;color:var(--gold);font-weight:700;margin-bottom:10px}
-#jobsOverlay .sititle .dir {color:var(--dim);font-weight:400}
+#jobsOverlay .sideinput {margin:0 18px 6px;background:var(--ink-3);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:66px}
+#jobsOverlay .sihint {color:var(--paper-dim);font-size:14px;text-align:center;padding:9px 4px}
+#jobsOverlay .sititle {font-size:13.5px;color:var(--brass);font-weight:700;margin-bottom:10px}
+#jobsOverlay .sititle .dir {color:var(--paper-dim);font-weight:400}
 #jobsOverlay .sideinput .meas {padding-left:0}
 #jobsOverlay .arealist {padding:6px 18px 0;display:flex;flex-direction:column;gap:10px}
-#jobsOverlay .arearow {display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid rgba(214,168,75,.14);
+#jobsOverlay .arearow {display:flex;align-items:center;gap:12px;background:var(--ink-2);border:1px solid rgba(214,168,75,.14);
   border-radius:14px;padding:13px 14px;box-shadow:0 4px 14px rgba(0,0,0,.35);cursor:pointer}
-#jobsOverlay .arearow:active {border-color:var(--gold)}
+#jobsOverlay .arearow:active {border-color:var(--brass)}
 #jobsOverlay .arearow .info {flex:1;min-width:0}
 #jobsOverlay .arearow .an {font-weight:600;color:var(--paper);font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#jobsOverlay .arearow .am {font-size:12.5px;color:var(--dim);margin-top:3px}
+#jobsOverlay .arearow .am {font-size:12.5px;color:var(--paper-dim);margin-top:3px}
 #jobsOverlay .arearow .del {padding:8px 11px;font-size:13px;flex:none}
 #jobsOverlay .arearow .rn {padding:8px 10px;font-size:15px;flex:none}
 #jobsOverlay .arearow.renaming {gap:8px}
-#jobsOverlay .renameinput {flex:1;min-width:0;background:var(--panel2);border:1.5px solid var(--gold);color:var(--paper);
+#jobsOverlay .renameinput {flex:1;min-width:0;background:var(--ink-3);border:1.5px solid var(--brass);color:var(--paper);
   border-radius:10px;padding:10px 12px;font-size:16px;-webkit-user-select:text;user-select:text}
 #jobsOverlay .arearow .rnok {padding:9px 14px;font-size:15px;flex:none}
 #jobsOverlay .matchip {display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;font-weight:600;
-  background:rgba(230,197,120,.16);color:var(--goldL)}
+  background:rgba(230,197,120,.16);color:var(--brass-lite)}
 #jobsOverlay .matchip.excl {background:rgba(224,161,95,.16);color:var(--warn)}
-#jobsOverlay .jobtotal {margin:16px 18px 0;padding:14px 16px;background:linear-gradient(180deg,#2a1f12,#1a130b);
+#jobsOverlay .jobtotal {margin:16px 18px 0;padding:14px 16px;background:var(--ink-2);
   border:1px solid rgba(214,168,75,.30);border-radius:14px;display:flex;align-items:baseline;justify-content:space-between;gap:10px}
-#jobsOverlay .jobtotal .lab {color:var(--dim);font-size:13px}
-#jobsOverlay .jobtotal .val {font-family:Georgia,"Times New Roman",serif;font-size:26px;color:#f3ead6;white-space:nowrap}
-#jobsOverlay .jobtotal .val small {font-size:14px;color:var(--gold);font-weight:600}
-#jobsOverlay .emptyjob {color:var(--dim);text-align:center;padding:32px 24px;font-size:15px;line-height:1.7}
-#jobsOverlay .jobest {margin:12px 18px 0;background:var(--panel);border:1px solid rgba(214,168,75,.14);border-radius:14px;padding:12px 14px}
-#jobsOverlay .esthead {font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:10px}
+#jobsOverlay .jobtotal .lab {color:var(--paper-dim);font-size:13px}
+#jobsOverlay .jobtotal .val {font-family:Georgia,"Times New Roman",serif;font-size:26px;color:var(--paper);white-space:nowrap}
+#jobsOverlay .jobtotal .val small {font-size:14px;color:var(--brass);font-weight:600}
+#jobsOverlay .emptyjob {color:var(--paper-dim);text-align:center;padding:32px 24px;font-size:15px;line-height:1.7}
+#jobsOverlay .jobest {margin:12px 18px 0;background:var(--ink-2);border:1px solid rgba(214,168,75,.14);border-radius:14px;padding:12px 14px}
+#jobsOverlay .esthead {font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--brass);font-weight:700;margin-bottom:10px}
 #jobsOverlay .estctrls {display:flex;gap:12px;margin-bottom:6px}
-#jobsOverlay .estlab {flex:1;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim)}
-#jobsOverlay .estin {background:var(--panel2);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);border-radius:10px;padding:9px 10px;font-size:16px;-webkit-user-select:text;user-select:text}
-#jobsOverlay .estrow {display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:14px;border-top:1px solid #2a2013}
-#jobsOverlay .estrow .em {color:var(--dim)}
-#jobsOverlay .estrow.boxes {font-weight:600;color:#f3ead6}
-#jobsOverlay .estnote {color:var(--dim);font-size:11.5px;margin-top:6px}
+#jobsOverlay .estlab {flex:1;display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--paper-dim)}
+#jobsOverlay .estin {background:var(--ink-3);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);border-radius:10px;padding:9px 10px;font-size:16px;-webkit-user-select:text;user-select:text}
+#jobsOverlay .estrow {display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:14px;border-top:1px solid var(--line-soft)}
+#jobsOverlay .estrow .em {color:var(--paper-dim)}
+#jobsOverlay .estrow.boxes {font-weight:600;color:var(--paper)}
+#jobsOverlay .estnote {color:var(--paper-dim);font-size:11.5px;margin-top:6px}
 #jobsOverlay .areadetails {display:flex;gap:10px;padding:4px 18px 10px}
-#jobsOverlay .areaname {flex:1;min-width:0;background:var(--panel2);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);
+#jobsOverlay .areaname {flex:1;min-width:0;background:var(--ink-3);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);
   border-radius:11px;padding:11px 12px;font-size:16px;-webkit-user-select:text;user-select:text}
-#jobsOverlay .areaname::placeholder {color:#8a7a5f}
-#jobsOverlay .areamat {background:var(--panel2);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);
+#jobsOverlay .areaname::placeholder {color:var(--paper-faint)}
+#jobsOverlay .areamat {background:var(--ink-3);border:1.5px solid rgba(214,168,75,.20);color:var(--paper);
   border-radius:11px;padding:11px 8px;font-size:15px;max-width:44%}
 #jobsOverlay /* ---- shared buttons ---- */
-button {font:inherit;background:var(--panel2);color:var(--paper);border:1px solid rgba(214,168,75,.16);
+button {font:inherit;background:var(--ink-3);color:var(--paper);border:1px solid rgba(214,168,75,.16);
   border-radius:12px;padding:13px 16px;font-size:15px;cursor:pointer;transition:transform .05s ease}
 #jobsOverlay button:active {transform:translateY(1px)}
-#jobsOverlay button.primary {background:var(--brass);border:none;color:#241a08;font-weight:700;flex:1;
+#jobsOverlay button.primary {background:var(--brass-grad);border:none;color:var(--on-brass);font-weight:700;flex:1;
   box-shadow:0 4px 14px rgba(184,134,46,.30),inset 0 1px 0 rgba(255,255,255,.35)}
-#jobsOverlay button.gold {background:var(--brass);border:none;color:#241a08;font-weight:700;
+#jobsOverlay button.gold {background:var(--brass-grad);border:none;color:var(--on-brass);font-weight:700;
   box-shadow:0 4px 14px rgba(184,134,46,.30),inset 0 1px 0 rgba(255,255,255,.35)}
 #jobsOverlay button.ghost {background:transparent}
 #jobsOverlay button.grow {flex:1}
@@ -407,43 +520,43 @@ button {font:inherit;background:var(--panel2);color:var(--paper);border:1px soli
 .stgTbl tr.pinned{background:rgba(190,150,70,.22);}
 .stgTbl tr.pinned td{font-weight:700;}
 button.stgPin{min-width:30px;min-height:30px;border:0;border-radius:8px;background:transparent;
-  color:#c9b487;font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:4px 6px;}
+  color:var(--paper-dim);font:inherit;font-size:15px;line-height:1;cursor:pointer;padding:4px 6px;}
 button.stgPin:hover{background:rgba(190,150,70,.18);}
 button.stgPin.on{background:rgba(190,150,70,.30);}
-.stgPinNote{padding:4px 2px 0;font-size:12px;color:#c9b487;}
+.stgPinNote{padding:4px 2px 0;font-size:12px;color:var(--paper-dim);}
 .stgShopNote{padding:4px 2px 0;font-size:12px;opacity:.75;}
 .oldstore{margin:14px 2px 0;padding:10px 12px;border:1px solid rgba(190,150,70,.35);
   border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .oldstore .lab{flex:1;font-size:13px;opacity:.85;}
 .jobsMsg{margin:10px 2px 0;padding:9px 12px;border-radius:10px;font-size:13px;line-height:1.45;
-  background:rgba(190,150,70,.12);border:1px solid rgba(190,150,70,.3);color:#e8d6a8;}
+  background:rgba(190,150,70,.12);border:1px solid rgba(190,150,70,.3);color:var(--paper);}
 .jobsMsg[hidden]{display:none;}
 
 /* ===== SUPPORT & BACKUP ===== */
-#jobsOverlay .supWrap{padding:2px 14px calc(20px + env(safe-area-inset-bottom));}
+#jobsOverlay .supWrap{padding:2px 14px calc(20px + var(--safe-b));}
 #jobsOverlay .supHead{display:flex;align-items:center;gap:10px;margin:20px 2px 8px;}
 #jobsOverlay .supHead .lab{font-size:12px;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--gold);font-weight:700;white-space:nowrap;}
+  color:var(--brass);font-weight:700;white-space:nowrap;}
 #jobsOverlay .supHead .rule{flex:1;height:1px;background:rgba(214,168,75,.22);}
-#jobsOverlay .supCard{background:var(--panel2);border:1px solid rgba(214,168,75,.18);
-  border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.6;color:#d8cbb4;}
+#jobsOverlay .supCard{background:var(--ink-3);border:1px solid rgba(214,168,75,.18);
+  border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.6;color:var(--paper-dim);}
 #jobsOverlay .supRow{display:flex;gap:10px;margin:10px 0 4px;}
 #jobsOverlay .supRow > *{flex:1;}
 #jobsOverlay .supMsg{margin:10px 2px 0;padding:9px 12px;border-radius:10px;font-size:13px;
-  line-height:1.45;background:rgba(190,150,70,.12);border:1px solid rgba(190,150,70,.3);color:#e8d6a8;}
+  line-height:1.45;background:rgba(190,150,70,.12);border:1px solid rgba(190,150,70,.3);color:var(--paper);}
 #jobsOverlay .supMsg[hidden]{display:none;}
-#jobsOverlay .supFoot{margin:18px 2px 0;text-align:center;font-size:11.5px;line-height:1.6;color:#8d7c62;}
+#jobsOverlay .supFoot{margin:18px 2px 0;text-align:center;font-size:11.5px;line-height:1.6;color:var(--paper-faint);}
 #jobsOverlay .payTabs{display:flex;gap:7px;flex-wrap:wrap;margin:4px 0 12px;}
 #jobsOverlay button.payTab{padding:7px 13px;font-size:13px;border-radius:20px;}
-#jobsOverlay button.payTab.on{background:var(--brass);border:none;color:#241a08;font-weight:700;}
+#jobsOverlay button.payTab.on{background:var(--brass-grad);border:none;color:var(--on-brass);font-weight:700;}
 #jobsOverlay .payLine{display:flex;align-items:center;gap:10px;padding:6px 0;}
-#jobsOverlay .payLine .k{flex:1;color:var(--dim);font-size:13px;}
-#jobsOverlay .payLine .v{font-weight:700;font-size:13.5px;color:#F2DD6E;}
+#jobsOverlay .payLine .k{flex:1;color:var(--paper-dim);font-size:13px;}
+#jobsOverlay .payLine .v{font-weight:700;font-size:13.5px;color:var(--brass-lite);}
 #jobsOverlay .payAddr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
-  word-break:break-all;color:#efe4d1;background:#17110a;border-radius:8px;padding:9px 10px;
+  word-break:break-all;color:var(--paper);background:var(--ink);border-radius:8px;padding:9px 10px;
   margin:6px 0 10px;-webkit-user-select:text;user-select:text;}
 #jobsOverlay button.supCopy{padding:6px 12px;font-size:12.5px;border-radius:9px;}
-#jobsOverlay .payNote{margin-top:10px;font-size:12.5px;line-height:1.55;color:var(--dim);text-align:center;}
+#jobsOverlay .payNote{margin-top:10px;font-size:12.5px;line-height:1.55;color:var(--paper-dim);text-align:center;}
 .diagOk,.diagBad{margin:6px 2px 10px;padding:12px 14px;border-radius:10px;font-weight:700;}
 .diagOk{background:rgba(120,170,110,.18);border:1px solid rgba(120,170,110,.5);}
 .diagBad{background:rgba(190,90,70,.18);border:1px solid rgba(190,90,70,.55);}
@@ -462,12 +575,8 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
 <body>
 <div class="app">
   <header class="top">
-    <h1>EGS Paneling Planner</h1>
-    <div class="sub">Ceiling &amp; wall board layouts</div>
-    <div class="modebar">
-      <button id="mode-panel" class="on">Paneling</button>
-      <button id="mode-floor">Flooring</button>
-    </div>
+    <h1>Stagger</h1>
+    <div class="sub">Flooring layouts, stagger &amp; cut list</div>
     <button id="openJobs">☷ Jobs &amp; areas</button>
   </header>
 
@@ -522,7 +631,7 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
    <!-- ===== FLOORING MODULE SETUP START ===== -->
    <div id="setup-floor" hidden>
     <div class="card">
-      <p class="lbl">Room</p>
+      <p class="lbl">Room <button class="helpdot" data-help="setup.room" aria-label="What is this?">i</button></p>
       <div class="grid2">
         <div class="field"><label>Length — plank run <span class="hint">e.g. 45'-0</span></label>
           <input type="text" id="f-len-ft" data-meas="ft" autocomplete="off" value="45'"><span class="echo" id="echo-f-len-ft"></span></div>
@@ -535,7 +644,7 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
     </div>
 
     <div class="card">
-      <p class="lbl">Plank</p>
+      <p class="lbl">Plank <button class="helpdot" data-help="setup.plank" aria-label="What is this?">i</button></p>
       <div class="grid2">
         <div class="field"><label>Length <span class="hint">inches</span></label>
           <input type="text" id="f-plen" data-meas="in" autocomplete="off" value="60"><span class="echo" id="echo-f-plen"></span></div>
@@ -552,7 +661,7 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
     </div>
 
     <div class="card">
-      <p class="lbl">Stagger rules</p>
+      <p class="lbl">Stagger rules <button class="helpdot" data-help="setup.rules" aria-label="What is this?">i</button></p>
       <div class="grid2">
         <div class="field"><label>Min joint offset <span class="hint">inches</span></label>
           <input type="text" id="f-minoff" data-meas="in" autocomplete="off" value="16"><span class="echo" id="echo-f-minoff"></span></div>
@@ -575,7 +684,7 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
   <section class="screen" id="s-print">
     <div class="card">
       <p class="lbl">Print / save</p>
-      <p style="font-size:14px;color:var(--muted);margin:0 0 14px">
+      <p style="font-size:14px;color:var(--paper-dim);margin:0 0 14px">
         Print the layout, takeoff and cut list — or download a file to keep or share.
         Everything works offline.</p>
       <button class="btn" id="btn-print">Open print sheet</button>
@@ -588,11 +697,56 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
     <div id="print-area"></div>
   </section>
 
+  <!-- ===== SETTINGS ===== -->
+  <section class="screen" id="s-settings">
+    <div class="card">
+      <p class="lbl">Appearance <button class="helpdot" data-help="set.theme" aria-label="What is this?">i</button></p>
+      <div class="segrow" role="radiogroup" aria-label="Theme">
+        <button class="seg" data-theme-set="light">Light</button>
+        <button class="seg" data-theme-set="dark">Dark</button>
+        <button class="seg" data-theme-set="system">System</button>
+      </div>
+      <p class="foot" style="text-align:left;margin-top:8px">System follows your phone's own light/dark setting.</p>
+    </div>
+
+    <div class="card">
+      <p class="lbl">Guidance <button class="helpdot" data-help="set.beginner" aria-label="What is this?">i</button></p>
+      <div class="segrow" role="radiogroup" aria-label="Guidance level">
+        <button class="seg" data-beginner-set="1">Beginner</button>
+        <button class="seg" data-beginner-set="0">Expert</button>
+      </div>
+      <p class="foot" style="text-align:left;margin-top:8px">Beginner shows small <b>i</b> markers beside the main controls. Tap one for a plain-English explanation.</p>
+    </div>
+
+    <div class="card">
+      <p class="lbl">Units</p>
+      <div class="segrow" role="radiogroup" aria-label="Units">
+        <button class="seg" data-units-set="imperial">Imperial</button>
+        <button class="seg" data-units-set="metric">Metric</button>
+      </div>
+      <p class="foot" style="text-align:left;margin-top:8px">Used when you measure an area's sides. Everything is stored in inches either way.</p>
+    </div>
+
+    <div class="card">
+      <p class="lbl">Paneling mode <button class="helpdot" data-help="set.paneling" aria-label="What is this?">i</button></p>
+      <div class="setrow">
+        <div class="setrow-lab">Ceiling &amp; wall board layouts<br>
+          <span class="hint">Stagger is a flooring tool. Turn this on only if you're panelling.</span></div>
+        <button class="switch" id="set-paneling" role="switch" aria-checked="false">
+          <span class="knob"></span></button>
+      </div>
+      <p class="foot" style="text-align:left;margin-top:8px">Currently: <b id="set-paneling-state">Off</b> — the app opens in flooring mode.</p>
+    </div>
+
+    <p class="foot">Stagger · <span id="set-version">—</span></p>
+  </section>
+
   <nav class="bottom">
     <button data-screen="s-setup" class="on"><span class="ic">▤</span>Setup</button>
     <button data-screen="s-layout"><span class="ic">▦</span>Layout</button>
     <button data-screen="s-cuts"><span class="ic">☰</span>Cut list</button>
     <button data-screen="s-print"><span class="ic">⎙</span>Print</button>
+    <button data-screen="s-settings"><span class="ic">⚙</span>Settings</button>
   </nav>
 </div>
 
@@ -1125,33 +1279,33 @@ function drawDiagram(inp, rowJoints, rowStock, showRows){
   function ix(inches){ return left + span*(inches/runIn); }
   var h = top + rows*rh + 26;
   var s = '<svg class="dg" viewBox="0 0 '+W+' '+h+'" role="img" aria-label="Ceiling paneling layout with joints on trusses">';
-  s += '<text x="'+left+'" y="'+(top-12)+'" font-size="8" fill="#B0873A" font-family="sans-serif">'+inp.offset+'\u2033</text>';
+  s += '<text x="'+left+'" y="'+(top-12)+'" font-size="8" fill=TOK.brass font-family="sans-serif">'+inp.offset+'\u2033</text>';
   trusses.forEach(function(p,i){
     var x=ix(p);
-    s += '<line x1="'+x.toFixed(1)+'" y1="'+(top-8)+'" x2="'+x.toFixed(1)+'" y2="'+(top+rows*rh)+'" stroke="#5F5E5A" stroke-width="1" stroke-dasharray="4 3"/>';
-    s += '<text x="'+x.toFixed(1)+'" y="'+(top-12)+'" font-size="7" fill="#888780" font-family="sans-serif" text-anchor="middle">'+(i+1)+'</text>';
+    s += '<line x1="'+x.toFixed(1)+'" y1="'+(top-8)+'" x2="'+x.toFixed(1)+'" y2="'+(top+rows*rh)+'" stroke=TOK.paperDim stroke-width="1" stroke-dasharray="4 3"/>';
+    s += '<text x="'+x.toFixed(1)+'" y="'+(top-12)+'" font-size="7" fill=TOK.paperFaint font-family="sans-serif" text-anchor="middle">'+(i+1)+'</text>';
   });
   for (var r=0;r<rows;r++){
     var y=top+r*rh;
-    s += '<rect x="'+left+'" y="'+(y+2)+'" width="'+span+'" height="'+(rh-4)+'" fill="#DCEAFB" stroke="#B5D4F4" stroke-width="0.5"/>';
+    s += '<rect x="'+left+'" y="'+(y+2)+'" width="'+span+'" height="'+(rh-4)+'" fill=TOK.ink3 stroke=TOK.line stroke-width="0.5"/>';
     // row label — each row is its own cut now, so every row gets its letter
     if ((rowJoints[r]||[]).length){
       var letter = (inp.unitRows && inp.unitRows>1) ? String.fromCharCode(65+(r % inp.unitRows)) : rowName(r);
-      s += '<text x="'+(left-3)+'" y="'+(y+rh-4)+'" font-size="7" fill="#185FA5" font-family="sans-serif" text-anchor="end">'+letter+'</text>';
+      s += '<text x="'+(left-3)+'" y="'+(y+rh-4)+'" font-size="7" fill=TOK.brass font-family="sans-serif" text-anchor="end">'+letter+'</text>';
     }
     (rowJoints[r]||[]).forEach(function(idx){
       if (trusses[idx]==null) return;
       var x=ix(trusses[idx]);
-      s += '<line x1="'+x.toFixed(1)+'" y1="'+(y+2)+'" x2="'+x.toFixed(1)+'" y2="'+(y+rh-2)+'" stroke="#042C53" stroke-width="2.5"/>';
+      s += '<line x1="'+x.toFixed(1)+'" y1="'+(y+2)+'" x2="'+x.toFixed(1)+'" y2="'+(y+rh-2)+'" stroke=TOK.paper stroke-width="2.5"/>';
     });
     if (rowStock && rowStock[r]!=null){
-      s += '<text x="'+(right-2)+'" y="'+(y+rh-4)+'" font-size="6.5" fill="#185FA5" font-family="sans-serif" text-anchor="end">'+Math.round(rowStock[r]/12*10)/10+'\u2032</text>';
+      s += '<text x="'+(right-2)+'" y="'+(y+rh-4)+'" font-size="6.5" fill=TOK.brass font-family="sans-serif" text-anchor="end">'+Math.round(rowStock[r]/12*10)/10+'\u2032</text>';
     }
   }
-  s += '<text x="'+left+'" y="'+(top+rows*rh+16)+'" font-size="9" fill="#888780" font-family="sans-serif">nailing edge</text>';
-  s += '<text x="'+right+'" y="'+(top+rows*rh+16)+'" font-size="9" fill="#888780" font-family="sans-serif" text-anchor="end">nailing edge</text>';
+  s += '<text x="'+left+'" y="'+(top+rows*rh+16)+'" font-size="9" fill=TOK.paperFaint font-family="sans-serif">nailing edge</text>';
+  s += '<text x="'+right+'" y="'+(top+rows*rh+16)+'" font-size="9" fill=TOK.paperFaint font-family="sans-serif" text-anchor="end">nailing edge</text>';
   if (rowJoints.length>rows){
-    s += '<text x="'+(W/2)+'" y="'+(top+rows*rh+16)+'" font-size="8" fill="#888780" font-family="sans-serif" text-anchor="middle">'+rows+' of '+rowJoints.length+' rows</text>';
+    s += '<text x="'+(W/2)+'" y="'+(top+rows*rh+16)+'" font-size="8" fill=TOK.paperFaint font-family="sans-serif" text-anchor="middle">'+rows+' of '+rowJoints.length+' rows</text>';
   }
   s += '</svg>';
   return s;
@@ -1321,7 +1475,7 @@ function buildPrintArea(){
   var area=$("print-area"); clear(area);
   if (!STATE.rowJoints || STATE.shortage) return;
   var inp=STATE.inp;
-  var title=el("div","print-title"); title.textContent="EGS Paneling — "+fmtFt(inp.runIn)+" run × "+inp.rows+" rows"; area.appendChild(title);
+  var title=el("div","print-title"); title.textContent="Stagger — paneling · "+fmtFt(inp.runIn)+" run × "+inp.rows+" rows"; area.appendChild(title);
   var dw=el("div","diagwrap"); dw.innerHTML=drawDiagram(inp, STATE.rowJoints, STATE.rowStock, inp.rows); area.appendChild(dw);
   if (STATE.takeoff){
     var t=STATE.takeoff; var to=el("div","takeoff");
@@ -1360,7 +1514,7 @@ function panelExportData(){
              stock: STATE.rowStock[r]!=null ? Math.round(STATE.rowStock[r]/12*10)/10+"\u2032" : "" };
   });
   return { kind:"Paneling",
-           title:"EGS Paneling \u2014 "+fmtFt(inp.runIn)+" run \u00d7 "+inp.rows+" rows",
+           title:"Stagger \u2014 paneling \u00b7 "+fmtFt(inp.runIn)+" run \u00d7 "+inp.rows+" rows",
            meta:meta, rows:rows,
            svg: drawDiagram(inp, STATE.rowJoints, STATE.rowStock, inp.rows),
            fmtPiece: fmtFt };
@@ -1380,13 +1534,13 @@ function exportSheetHTML(data){
     '<meta name="viewport" content="width=device-width,initial-scale=1">'+
     '<title>'+esc(data.title)+'</title><style>'+
     'body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a;margin:24px;max-width:760px}'+
-    'h1{font-size:18px;margin:0 0 4px;color:#042C53}'+
+    'h1{font-size:18px;margin:0 0 4px;color:#1c2026}'+
     '.meta{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:#444;margin:0 0 14px;padding-bottom:12px;border-bottom:1px solid #ccc}'+
     '.meta b{color:#111}'+
     '.diag{margin:0 0 16px;overflow-x:auto}.diag svg{max-width:100%;height:auto}'+
     'table{width:100%;border-collapse:collapse;font-size:13px}'+
     'td{padding:6px 8px;border-bottom:1px solid #e6e6e6;vertical-align:top}'+
-    '.rn{font-weight:700;color:#185FA5;white-space:nowrap;width:64px}'+
+    '.rn{font-weight:700;color:#8a6410;white-space:nowrap;width:64px}'+
     '.st{color:#777;text-align:right;white-space:nowrap}'+
     '.foot{margin-top:18px;font-size:11px;color:#999}'+
     '@media print{body{margin:0}.noprint{display:none}}'+
@@ -1595,17 +1749,23 @@ function switchScreen(id){
   window.scrollTo(0,0);
 }
 var MODE = "panel";
-function setMode(m){
+function setMode(m, opts){
   MODE = m;
   if (typeof FL !== "undefined" && FL.closeOverlay) FL.closeOverlay();
-  $("mode-panel").classList.toggle("on", m==="panel");
-  $("mode-floor").classList.toggle("on", m==="floor");
   $("setup-panel").hidden = (m!=="panel");
   $("setup-floor").hidden = (m!=="floor");
   clear($("layout-body")); clear($("cuts-body")); clear($("print-area"));
-  switchScreen("s-setup");
+  syncModeToggle();
+  try{ localStorage.setItem("stagger.paneling", m==="panel" ? "1" : "0"); }catch(e){}
+  if(!(opts && opts.quiet)) switchScreen("s-setup");
 }
-function syncModeToggle(){ /* removed — app now uses 5 options, no mode toggle */ }
+// The Paneling/Flooring control now lives in Settings, not the header.
+function syncModeToggle(){
+  var t=document.getElementById("set-paneling");
+  if(t) t.setAttribute("aria-checked", MODE==="panel" ? "true" : "false");
+  var s=document.getElementById("set-paneling-state");
+  if(s) s.textContent = MODE==="panel" ? "On" : "Off";
+}
 
 // ---------- build stock rows ----------
 (function buildStockUI(){
@@ -1633,9 +1793,123 @@ $("btn-generate").addEventListener("click", generate);
 $("btn-print").addEventListener("click", doPrint);
 $("btn-export-html").addEventListener("click", doDownloadHTML);
 $("btn-export-csv").addEventListener("click", doDownloadCSV);
-$("mode-floor").addEventListener("click", function(){ setMode("floor"); });
-$("mode-panel").addEventListener("click", function(){ setMode("panel"); });
-setMode("floor");  // Stagger defaults to flooring on open
+// Flooring-first on open. Paneling is opt-in from Settings and is remembered
+// per device; a stored preference wins over the default.
+(function(){
+  var paneling="0";
+  try{ paneling = localStorage.getItem("stagger.paneling") || "0"; }catch(e){}
+  setMode(paneling==="1" ? "panel" : "floor", {quiet:true});
+})();
+switchScreen("s-setup");
+
+/* ===========================================================================
+   SETTINGS — appearance, guidance, units, paneling mode
+   Preferences are per-device and use the dotted key convention (stagger.*),
+   matching stagger.units / stagger.store.v1.
+   =========================================================================== */
+var STG_PREF = { theme:"stagger.theme", guide:"stagger.beginner", units:"stagger.units" };
+function prefGet(k, dflt){ try{ return localStorage.getItem(k) || dflt; }catch(e){ return dflt; } }
+function prefSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+
+/* ---- Beginner help copy — ONE liftable block. All wording lives here. ----
+   Keys are referenced from markup as data-help="<key>". Rendered with
+   textContent, never innerHTML. */
+var STAGGER_HELP = {
+  "set.theme":     "Light is easier to read outdoors and on site. Dark is easier on the eyes indoors and at night. System follows whatever your phone is already set to.",
+  "set.beginner":  "Beginner mode adds these small i markers next to the main controls. Turn it off once the app feels familiar and they all disappear.",
+  "set.paneling":  "Paneling is a different job from flooring: boards run across ceiling or wall trusses, so the rules are about nailing edges rather than plank joints. Leave this off unless that's the work you're doing.",
+  "setup.room":    "Measure the finished floor, not the subfloor. Run the planks along the longest wall — it uses fewer boards and looks better.",
+  "setup.plank":   "These come off the carton. Planks per box and boxes to rotate matter because laminate patterns repeat: pulling straight from one box makes the floor read fake.",
+  "setup.rules":   "A joint must clear the row above it and the row two above it. Check your plank maker's minimum — most ask for 12 inches or a third of a plank.",
+  "layout.views":  "Same layout, five ways of looking at it. Blueprint is the plain plan, Wood shows it as timber, Clearance highlights joints that are close to the minimum, Install is for ticking rows off as you lay them.",
+  "layout.numbers":"Boxes is what to buy. Offcut waste is how much you would throw away — a lower number means the layout is reusing more of each cut piece.",
+  "cuts.list":     "Work down this list in order. Each row tells you the pieces to cut and, where it matters, which offcut to reuse.",
+  "job.areas":     "A job is one house or site. Each area inside it is one room or space, measured on its own, with its own material.",
+  "job.estimate":  "A first pass at boards needed, using your Setup numbers. It is a planning figure — always add your own buffer for breakage."
+};
+
+function stgHelpToggle(key, host){
+  var existing = host.querySelector(".helpbox[data-help-for='" + key + "']");
+  if(existing){ existing.parentNode.removeChild(existing); return; }
+  Array.prototype.forEach.call(document.querySelectorAll(".helpbox"), function(b){
+    b.parentNode.removeChild(b);
+  });
+  var box = document.createElement("div");
+  box.className = "helpbox";
+  box.setAttribute("data-help-for", key);
+  box.textContent = STAGGER_HELP[key] || "No explanation for this one yet.";
+  host.appendChild(box);
+}
+document.addEventListener("click", function(e){
+  var dot = e.target && e.target.closest ? e.target.closest(".helpdot") : null;
+  if(!dot) return;
+  e.preventDefault(); e.stopPropagation();
+  stgHelpToggle(dot.getAttribute("data-help"), dot.closest(".card") || dot.parentNode);
+});
+
+function syncSegs(attr, val){
+  Array.prototype.forEach.call(document.querySelectorAll("[" + attr + "]"), function(b){
+    b.classList.toggle("on", b.getAttribute(attr) === val);
+  });
+}
+function applyGuide(v){
+  document.documentElement.setAttribute("data-guide", v === "0" ? "expert" : "beginner");
+  syncSegs("data-beginner-set", v === "0" ? "0" : "1");
+}
+// Redraw whichever screen is showing, so a theme change reaches the SVGs.
+function rerenderActive(){
+  var active = document.querySelector(".screen.active");
+  if(!active) return;
+  try{
+    if(active.id === "s-layout")     { if(MODE==="floor") FL.renderLayout();   else renderLayout(); }
+    else if(active.id === "s-cuts")  { if(MODE==="floor") FL.renderCuts();     else renderCuts(); }
+    else if(active.id === "s-print") { if(MODE==="floor") FL.buildPrintArea(); else buildPrintArea(); }
+  }catch(e){ /* nothing generated yet — nothing to redraw */ }
+}
+function applyTheme(pref){
+  var dark = pref === "dark" || (pref !== "light" && window.matchMedia &&
+             window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if(meta) meta.setAttribute("content", dark ? "#15181d" : "#f4f5f6");
+  if(typeof refreshTokens === "function") refreshTokens();
+  rerenderActive();
+  syncSegs("data-theme-set", pref);
+}
+
+(function stgWireSettings(){
+  Array.prototype.forEach.call(document.querySelectorAll("[data-theme-set]"), function(b){
+    b.addEventListener("click", function(){
+      var v=b.getAttribute("data-theme-set"); prefSet(STG_PREF.theme, v); applyTheme(v); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-beginner-set]"), function(b){
+    b.addEventListener("click", function(){
+      var v=b.getAttribute("data-beginner-set"); prefSet(STG_PREF.guide, v); applyGuide(v); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-units-set]"), function(b){
+    b.addEventListener("click", function(){
+      var v=b.getAttribute("data-units-set"); prefSet(STG_PREF.units, v); syncSegs("data-units-set", v); });
+  });
+  var sw = document.getElementById("set-paneling");
+  if(sw) sw.addEventListener("click", function(){
+    setMode(MODE === "panel" ? "floor" : "panel", {quiet:true});
+  });
+
+  // keep System live if the phone flips theme while the app is open
+  if(window.matchMedia){
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    var onChange = function(){ if(prefGet(STG_PREF.theme,"system")==="system") applyTheme("system"); };
+    if(mq.addEventListener) mq.addEventListener("change", onChange);
+    else if(mq.addListener) mq.addListener(onChange);
+  }
+
+  applyTheme(prefGet(STG_PREF.theme, "system"));
+  applyGuide(prefGet(STG_PREF.guide, "1"));          // beginner ON by default
+  syncSegs("data-units-set", prefGet(STG_PREF.units, "imperial"));
+  syncModeToggle();
+  var ver = document.getElementById("set-version");
+  if(ver) ver.textContent = (window.EGS_VERSION || "dev");
+})();
 
 // ============================================================
 //  ===== FLOORING MODULE START =====
@@ -2062,12 +2336,66 @@ var FL = (function(){
     { id:"wood",      name:"Wood" },
     { id:"install",   name:"Install" }
   ];
-  var LEGENDS = {
-    heat: [["#3B6D11","generous"],["#9DBF3C","comfortable"],["#EF9F27","near minimum"],["#D14B2A","under minimum"]],
-    install: [["#EAF3DE","done"],["#FFF4DE","current row"],["#F7F5EF","to do"]]
-  };
-  var BLUE = ["#C9DCF0","#B4CEE9","#DCE9F6","#A7C5E4","#C0D6EE"];
-  var WOOD = ["#C89A5F","#BE8E52","#D2A76C","#B5854A","#CBA067","#C0925A"];
+  /* ---- theme tokens for the SVG renderers ----------------------------------
+     These colours are painted as SVG attributes, so a CSS variable swap cannot
+     reach them. Read the values out of CSS once per theme change instead, so
+     the stylesheet stays the single source of truth for both themes.
+     refreshTokens() is called on boot and again whenever the theme changes. */
+  var TOK = {};
+  function refreshTokens(){
+    var s = getComputedStyle(document.documentElement);
+    function g(n, fallback){
+      var v = s.getPropertyValue(n);
+      v = v ? v.trim() : "";
+      return v || fallback;
+    }
+    function ramp(prefix, count, fallbacks){
+      var out = [];
+      for (var i = 1; i <= count; i++) out.push(g(prefix + i, fallbacks[i-1]));
+      return out;
+    }
+    TOK.plank     = ramp("--plank-", 6, ["#C89A5F","#BE8E52","#D2A76C","#B5854A","#CBA067","#C0925A"]);
+    TOK.heat      = ramp("--heat-",  4, ["#3B6D11","#9DBF3C","#EF9F27","#D14B2A"]);
+    TOK.ink       = g("--ink",       "#15181d");
+    TOK.ink2      = g("--ink-2",     "#1d2127");
+    TOK.ink3      = g("--ink-3",     "#191d22");
+    TOK.stage     = g("--stage-bg",  "#111419");
+    TOK.paper     = g("--paper",     "#e8eaed");
+    TOK.paperDim  = g("--paper-dim", "#a8aeb6");
+    TOK.paperFaint= g("--paper-faint","#828891");
+    TOK.line      = g("--line",      "#2b3138");
+    TOK.lineSoft  = g("--line-soft", "#232930");
+    TOK.grid      = g("--grid",      "#20252b");
+    TOK.gridMajor = g("--grid-major","#2b3138");
+    TOK.brass     = g("--brass",     "#c89a34");
+    TOK.brassFill = g("--brass-fill","#C89A34");
+    TOK.brassLite = g("--brass-lite","#E6C578");
+    TOK.onBrass   = g("--on-brass",  "#1a1408");
+    TOK.ok        = g("--ok",        "#4e9d63");
+    TOK.warn      = g("--warn",      "#e0a15f");
+    TOK.danger    = g("--danger",    "#c8654a");
+    // legends and ramps are rebuilt from the fresh tokens
+    LEGENDS.heat = [[TOK.heat[0],"generous"],[TOK.heat[1],"comfortable"],
+                    [TOK.heat[2],"near minimum"],[TOK.heat[3],"under minimum"]];
+    LEGENDS.install = [[TOK.ok,"done"],[TOK.warn,"current row"],[TOK.ink3,"to do"]];
+    // "Blueprint" is the flat/technical skin (neutral sheet ramp), "Wood" the
+    // timber skin (plank ramp). Both follow the theme; both keep 5-6 distinct
+    // steps so adjacent boards stay tellable apart.
+    BLUE.length = 0; WOOD.length = 0;
+    ramp("--sheet-", 5, ["#232830","#262c35","#202630","#2a313a","#1e242c"])
+      .forEach(function(c){ BLUE.push(c); });
+    TOK.plank.forEach(function(c){ WOOD.push(c); });
+  }
+  var LEGENDS = { heat: [], install: [] };
+  var BLUE = [];
+  var WOOD = [];
+  refreshTokens();
+  // This block is inside the flooring module's closure, but the theme switcher
+  // in Settings lives at global scope — without this export its
+  // `typeof refreshTokens === "function"` check is false and the SVG renderers
+  // silently keep the old theme's colours.
+  window.refreshTokens = refreshTokens;
+  window.TOK = TOK;
 
   // One renderer, five skins. opts: {view, rotated, gutter, tappable}
   function buildSvg(cand, cfg, opts){
@@ -2088,7 +2416,7 @@ var FL = (function(){
     if (opts.rotated) g.setAttribute("transform", "rotate(90) translate(" + GUT + ",-" + H + ")");
     svg.appendChild(g);
 
-    var bg = { blueprint:"#F1EFE8", seams:"#FFFFFF", heat:"#FAF9F5", wood:"#8A6A3E", install:"#FFFFFF" }[view];
+    var bg = { blueprint:TOK.ink, seams:TOK.ink2, heat:TOK.ink2, wood:TOK.brass, install:TOK.ink2 }[view];
     g.appendChild(mk("rect", { x:-GUT, y:0, width:W, height:H, fill:bg }));
 
     var cur = currentRow();
@@ -2103,19 +2431,19 @@ var FL = (function(){
       if (i>1) nb = nb.concat(rowJoints(cand.rows[i-2]));
 
       for (var p=0; p<r.pieces.length; p++){
-        var len = r.pieces[p], fill, stroke = "#042C53", sw = 0.6;
+        var len = r.pieces[p], fill, stroke = TOK.paper, sw = 0.6;
 
         if (view === "blueprint"){
           fill = BLUE[(i*3+p) % BLUE.length];
         } else if (view === "seams"){
-          fill = "#FFFFFF"; stroke = "none"; sw = 0;
+          fill = TOK.ink2; stroke = "none"; sw = 0;
         } else if (view === "heat"){
-          fill = "#FFFFFF"; stroke = "#DDDBD2"; sw = 0.4;
+          fill = TOK.ink2; stroke = TOK.line; sw = 0.4;
         } else if (view === "wood"){
-          fill = WOOD[(i*5+p*3) % WOOD.length]; stroke = "#6E5230"; sw = 0.5;
+          fill = WOOD[(i*5+p*3) % WOOD.length]; stroke = TOK.brass; sw = 0.5;
         } else { // install
-          fill = isDone ? "#EAF3DE" : isNow ? "#FFF4DE" : "#F7F5EF";
-          stroke = isNow ? "#EF9F27" : "#B9B7AE"; sw = isNow ? 1.5 : 0.5;
+          fill = isDone ? TOK.ok : isNow ? TOK.warn : TOK.ink3;
+          stroke = isNow ? TOK.warn : TOK.line; sw = isNow ? 1.5 : 0.5;
         }
 
         var rect = mk("rect", { x:x.toFixed(2), y:y.toFixed(2), width:len.toFixed(2),
@@ -2135,7 +2463,7 @@ var FL = (function(){
         if (view === "install" && len > 26){
           var t = mk("text", { x:(x+len/2).toFixed(2), y:(y+h/2+2.1).toFixed(2),
             "font-size":"5.2", "text-anchor":"middle", "font-family":"monospace",
-            fill: isDone ? "#3B6D11" : "#5F5E5A" });
+            fill: isDone ? TOK.ok : TOK.paperDim });
           if (opts.rotated) t.setAttribute("transform","rotate(-90 "+(x+len/2).toFixed(2)+" "+(y+h/2).toFixed(2)+")");
           t.textContent = Math.abs(len-cfg.plankLen) < 0.01 ? "full" : inch(len);
           g.appendChild(t);
@@ -2146,10 +2474,10 @@ var FL = (function(){
       // seams / heat draw the joints on top
       if (view === "seams"){
         g.appendChild(mk("line", { x1:0, y1:(y+h).toFixed(2), x2:cfg.runIn, y2:(y+h).toFixed(2),
-          stroke:"#E4E2DA", "stroke-width":0.5 }));
+          stroke:TOK.lineSoft, "stroke-width":0.5 }));
         rowJoints(r).forEach(function(jx){
           g.appendChild(mk("line", { x1:jx.toFixed(2), y1:y.toFixed(2), x2:jx.toFixed(2),
-            y2:(y+h).toFixed(2), stroke:"#042C53", "stroke-width":2.4,
+            y2:(y+h).toFixed(2), stroke:TOK.paper, "stroke-width":2.4,
             "stroke-linecap":"round", "stroke-opacity": isDone ? 0.3 : 1 }));
         });
       }
@@ -2159,7 +2487,7 @@ var FL = (function(){
           for (var q=0;q<nb.length;q++) d = Math.min(d, Math.abs(jx-nb[q]));
           if (!isFinite(d)) d = cfg.plankLen;
           var m = cfg.minOff;
-          var col = d < m ? "#D14B2A" : d < m*1.25 ? "#EF9F27" : d < m*1.6 ? "#9DBF3C" : "#3B6D11";
+          var col = d < m ? "#D14B2A" : d < m*1.25 ? TOK.warn : d < m*1.6 ? "#9DBF3C" : TOK.ok;
           g.appendChild(mk("line", { x1:jx.toFixed(2), y1:y.toFixed(2), x2:jx.toFixed(2),
             y2:(y+h).toFixed(2), stroke:col, "stroke-width":3, "stroke-linecap":"round",
             "stroke-opacity": isDone ? 0.3 : 1 }));
@@ -2170,7 +2498,7 @@ var FL = (function(){
       if (opts.gutter){
         var num = mk("text", { x:(-GUT/2).toFixed(2), y:(y+h/2+2.4).toFixed(2),
           "font-size":"6.4", "text-anchor":"middle", "font-family":"monospace",
-          "font-weight":"bold", fill: isNow ? "#854F0B" : isDone ? "#3B6D11" : "#888780" });
+          "font-weight":"bold", fill: isNow ? TOK.warn : isDone ? TOK.ok : TOK.paperFaint });
         if (opts.rotated) num.setAttribute("transform","rotate(-90 "+(-GUT/2).toFixed(2)+" "+(y+h/2).toFixed(2)+")");
         num.textContent = isDone ? "\u2713" : String(r.n);
         g.appendChild(num);
@@ -2378,7 +2706,7 @@ var FL = (function(){
       LEGENDS[S.view].forEach(function(pair){
         var sp=el("span");
         var sw=el("i"); sw.style.background=pair[0];
-        if (pair[0]==="#F7F5EF"||pair[0]==="#FFF4DE") sw.style.border=".5px solid #B9B7AE";
+        if (pair[0]===TOK.ink3||pair[0]===TOK.warn) sw.style.border=".5px solid #B9B7AE";
         sp.appendChild(sw);
         sp.appendChild(document.createTextNode(pair[1]));
         lg.appendChild(sp);
@@ -2433,7 +2761,7 @@ var FL = (function(){
       var warn=el("div","card");
       var wl=el("p","lbl"); wl.textContent="Your rules are forcing the pattern";
       warn.appendChild(wl);
-      var wp=el("p"); wp.style.fontSize="13px"; wp.style.color="var(--muted)"; wp.style.margin="0 0 8px";
+      var wp=el("p"); wp.style.fontSize="13px"; wp.style.color="var(--paper-dim)"; wp.style.margin="0 0 8px";
       var ratio = cfg.plankLen / cfg.minOff;
       wp.textContent = "A " + inch(cfg.plankLen) + " plank divided by a " + inch(cfg.minOff)
         + " minimum offset leaves room for only " + Math.floor(ratio) + " joint positions"
@@ -2508,7 +2836,7 @@ var FL = (function(){
         return Math.abs(p-cfg.plankLen)<0.001 ? "full" : inch(p);
       }).join("  \u00b7  ");
       head.appendChild(big);
-      var sub=el("p"); sub.style.fontSize="12.5px"; sub.style.color="var(--muted)"; sub.style.margin="0";
+      var sub=el("p"); sub.style.fontSize="12.5px"; sub.style.color="var(--paper-dim)"; sub.style.margin="0";
       sub.textContent = r.src;
       head.appendChild(sub);
 
@@ -2517,7 +2845,7 @@ var FL = (function(){
       done.addEventListener("click", function(){ toggleRow(cur); });
       head.appendChild(done);
     } else {
-      var p=el("p"); p.style.fontSize="13px"; p.style.color="var(--muted)"; p.style.margin="0";
+      var p=el("p"); p.style.fontSize="13px"; p.style.color="var(--paper-dim)"; p.style.margin="0";
       p.textContent = "Every row is ticked off. Tap any row below to reopen it.";
       head.appendChild(p);
     }
@@ -2605,7 +2933,7 @@ var FL = (function(){
     stats.appendChild(statBox(String(S.box.planks), "Planks used"));
     card.appendChild(stats);
 
-    var p=el("p"); p.style.fontSize="13px"; p.style.color="var(--muted)"; p.style.margin="10px 0 0";
+    var p=el("p"); p.style.fontSize="13px"; p.style.color="var(--paper-dim)"; p.style.margin="10px 0 0";
     p.textContent = "Open " + cfg.rotate + " boxes before you start and pull one plank from each in turn. "
       + "The printed grain repeats every 6\u201310 planks, so laying straight out of one box lines the same "
       + "photo up across rows and the floor reads as fake.";
@@ -2722,7 +3050,7 @@ $("f-btn-generate").addEventListener("click", FL.generate);
   function egsUpdateBanner(){
     if(document.getElementById('egs-update')) return;
     var b=document.createElement('div'); b.id='egs-update';
-    b.style.cssText='position:fixed;left:12px;right:12px;bottom:76px;z-index:99999;background:#185FA5;color:#fff;font:600 15px -apple-system,Segoe UI,Roboto,sans-serif;padding:13px 16px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);display:flex;align-items:center;gap:12px';
+    b.style.cssText='position:fixed;left:12px;right:12px;bottom:calc(var(--nav-h) + var(--safe-b) + 12px);z-index:99999;background:var(--brass-fill);color:var(--on-brass);font:600 15px -apple-system,Segoe UI,Roboto,sans-serif;padding:13px 16px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35);display:flex;align-items:center;gap:12px';
     b.innerHTML='<span style="flex:1">A new version is ready.</span><button id="egs-upd-btn" style="background:#fff;color:#185FA5;border:0;border-radius:8px;padding:9px 15px;font:inherit;font-weight:700;cursor:pointer">Refresh</button>';
     document.body.appendChild(b);
     document.getElementById('egs-upd-btn').addEventListener('click', function(){ location.reload(); });
@@ -2733,7 +3061,7 @@ $("f-btn-generate").addEventListener("click", FL.generate);
 <!-- ===== STAGGER JOBS OVERLAY START ===== -->
 <div id="jobsOverlay" hidden>
   <div class="jobsOverlayInner">
-    <button id="jobsClose" class="jobsClose" aria-label="Close jobs">✕</button>
+    <button id="jobsClose" class="jobsClose" aria-label="Close jobs">×</button>
     <div id="stgRecovered" class="stgRecovered" hidden>Some saved data was unreadable and was reset. Your other jobs are intact.</div>
 
 
@@ -3530,8 +3858,8 @@ function showView(id){
         + '<span class="lbl">'+PRESETS[kk].name+'</span></div>';
   });
   html+='<div class="card custom" data-shape="custom">'
-      + '<svg viewBox="0 0 40 40"><path d="M8 32 L8 12 L28 12" fill="none" stroke="#EBC978" stroke-width="3" stroke-dasharray="5 4" stroke-linecap="round"/>'
-      + '<circle cx="30" cy="10" r="4" fill="#EBC978"/></svg>'
+      + '<svg viewBox="0 0 40 40"><path d="M8 32 L8 12 L28 12" fill="none" stroke=TOK.brassLite stroke-width="3" stroke-dasharray="5 4" stroke-linecap="round"/>'
+      + '<circle cx="30" cy="10" r="4" fill=TOK.brassLite/></svg>'
       + '<span class="lbl">Draw it myself</span></div>';
   host.innerHTML=html;
   host.querySelectorAll('.card').forEach(function(el){
@@ -3838,15 +4166,15 @@ function renderMeasureDiagram(){
       ly=my-(BR+GAP+halfH); if(ly-halfH<3) ly=my+(BR+GAP+halfH);
     }
     lx=Math.max(halfW+3, Math.min(W-halfW-3, mx));
-    s+='<g><rect x="'+(lx-halfW)+'" y="'+(ly-halfH-2)+'" width="'+wLab+'" height="'+(halfH*2+4)+'" rx="7" fill="#1a130b" stroke="rgba(214,168,75,.30)" stroke-width="1"/>'
-      +'<text x="'+lx+'" y="'+(ly+4)+'" text-anchor="middle" fill="#efe4d1" font-size="13" font-weight="600">'+txt+'</text></g>';
+    s+='<g><rect x="'+(lx-halfW)+'" y="'+(ly-halfH-2)+'" width="'+wLab+'" height="'+(halfH*2+4)+'" rx="7" fill=TOK.ink2 stroke="rgba(214,168,75,.30)" stroke-width="1"/>'
+      +'<text x="'+lx+'" y="'+(ly+4)+'" text-anchor="middle" fill=TOK.paper font-size="13" font-weight="600">'+txt+'</text></g>';
   });
   // numbered tabs (always show the number; tap to enter/edit)
   edges.forEach(function(e,i){
     var mx=(X(e.x1)+X(e.x2))/2, my=(Y(e.y1)+Y(e.y2))/2, act=(i===M.active), done=M.inches[i]!=null;
     var fill=act?'#F2DD6E':(done?'#C89A34':'#E6C578');
     s+='<circle data-side="'+i+'" cx="'+mx+'" cy="'+my+'" r="20" fill="transparent" pointer-events="all"/>';
-    s+='<circle data-side="'+i+'" cx="'+mx+'" cy="'+my+'" r="'+BR+'" fill="'+fill+'"'+(act?' stroke="#fff" stroke-width="2"':'')+'/>';
+    s+='<circle data-side="'+i+'" cx="'+mx+'" cy="'+my+'" r="'+BR+'" fill="'+fill+'"'+(act?' stroke=TOK.paper stroke-width="2"':'')+'/>';
     s+='<text class="sidenum" data-side="'+i+'" x="'+mx+'" y="'+(my+5)+'" text-anchor="middle">'+(i+1)+'</text>';
   });
   s+='</svg>';
@@ -3882,7 +4210,8 @@ var StaggerStore = (function(){
 //     destructive; an unknown FUTURE version is read-only, never overwritten.
 //   - site measures (siteWidthIn/siteDepthIn) win over computed dims.
 //   - storage failure (quota / private mode) is reported, never silently lost.
-//   - deletes are explicit calls (UI adds confirm()); nothing deletes on its own.
+//   - deletes are explicit calls (the UI gates them behind a confirm sheet that
+//     names the target); nothing deletes on its own.
 // ============================================================================
 
 var STORE_KEY = "stagger.store.v1";
@@ -4550,12 +4879,25 @@ function openJob(id){
 }
 function deleteJob(id){
   var st=storeDoc(); var j=StaggerStore.getJob(st,id); if(!j) return;
-  if(!confirm('Delete \u201c'+j.name+'\u201d and all its areas?')) return;
-  StaggerStore.deleteJob(st,id);
-  st.currentJobId = st.jobs.length ? st.jobs[0].id : null;
-  storeCommit();
-  if(JOB && JOB.id===id) JOB=null;
-  renderJobs();
+  // Name exactly what is going, and what goes with it.
+  var areas = (j.areas||[]).length;
+  var sqft  = (j.areas||[]).reduce(function(s,a){ return s + (a.sqft||0); }, 0);
+  var detail = areas + (areas===1?' area':' areas');
+  if(sqft) detail += ' \u00b7 ' + fmtSqft(sqft) + ' sq ft';
+  stgConfirmSheet({
+    title:'Delete this job?',
+    subject:{ name:j.name, detail:detail },
+    body:'The job and every area inside it are removed from this device. This cannot be undone.',
+    confirmLabel:'Delete job',
+    onConfirm:function(){
+      StaggerStore.deleteJob(st,id);
+      st.currentJobId = st.jobs.length ? st.jobs[0].id : null;
+      storeCommit();
+      if(JOB && JOB.id===id) JOB=null;
+      renderJobs();
+      stgJobsMsg('Deleted \u201c'+j.name+'\u201d.');
+    }
+  });
 }
 function renameJob(id, name){
   var nm=(name||'').trim(); if(!nm){ renamingJobIdx=-1; renderJobs(); return; }
@@ -4715,8 +5057,11 @@ function renderJob(){
     }
     var kind = (a.engineInput&&a.engineInput.rect) ? 'Rectangle'
              : (a.engineInput&&a.engineInput.profile ? a.engineInput.profile.bands.length+'-band' : 'shape');
-    var chip = a.excluded ? '<span class="matchip excl">Excluded</span>'
-             : '<span class="matchip">'+esc(matLabel(a.materialType))+'</span>';
+    // The chip is a control, not a label: tapping it edits the material without
+    // walking the whole draw -> measure flow again.
+    var chip = '<button type="button" class="matchip'+(a.excluded?' excl':'')
+             + '" data-mat="'+i+'" aria-label="Change material">'
+             + esc(a.excluded ? 'Excluded' : matLabel(a.materialType))+'</button>';
     return '<div class="arearow" data-i="'+i+'">'
       + '<div class="info"><div class="an">'+esc(a.name)+'</div>'
       + '<div class="am">'+chip+' \u00b7 '+fmtSqft(a.sqft)+' sq ft \u00b7 '+kind+'</div></div>'
@@ -4742,10 +5087,24 @@ function renderJob(){
   host.querySelectorAll('[data-saverename]').forEach(function(b){
     b.addEventListener('click', function(e){ e.stopPropagation(); var i=+b.getAttribute('data-saverename'); var inp=document.querySelector('.renameinput'); commitRename(i, inp?inp.value:''); });
   });
+  host.querySelectorAll('[data-mat]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation();
+      stgOpenMaterialSheet(+b.getAttribute('data-mat'));
+    });
+  });
   host.querySelectorAll('[data-del]').forEach(function(b){
     b.addEventListener('click', function(e){ e.stopPropagation();
       var i=+b.getAttribute('data-del');
-      if(confirm('Delete \u201c'+JOB.areas[i].name+'\u201d?')){ JOB.areas.splice(i,1); persist(); renderJob(); }
+      var ar=JOB.areas[i];
+      var det=fmtSqft(ar.sqft||0)+' sq ft';
+      if(ar.materialType) det += ' \u00b7 ' + matLabel(ar.materialType);
+      stgConfirmSheet({
+        title:'Delete this area?',
+        subject:{ name:ar.name, detail:det },
+        body:'It is removed from this job, along with its drawing and measurements. This cannot be undone.',
+        confirmLabel:'Delete area',
+        onConfirm:function(){ JOB.areas.splice(i,1); persist(); renderJob(); }
+      });
     });
   });
   var inp=host.querySelector('.renameinput');
@@ -4780,6 +5139,19 @@ function stgReadSetup(){
     if(!(v>0)){ var n=parseFloat(raw); v=isFinite(n)?n:fallback; }
     return v>0?v:fallback;
   }
+  // MODE MATTERS. The paneling inputs (i-face / i-oc / q-*) live in #setup-panel,
+  // which setMode() only ever marks hidden -- it stays in the DOM carrying its
+  // HTML defaults (5" face, 24" o.c., 12' stock). Reading them unconditionally
+  // meant that in FLOORING mode this returned three numbers the user never
+  // entered and could not see, and those numbers were then handed to the truss
+  // engine via v2RunSpread(). The estimate was the paneling engine running on
+  // invented constants. Flooring has no truss grid at all -- that is the whole
+  // point of the mode -- so say so instead of inventing one.
+  if(MODE !== 'panel'){
+    return { mode:'floor', ok:false,
+             reason:'The board estimate uses the paneling truss engine, which needs a truss '
+                  + 'grid. Flooring has none, so there is nothing honest to compute here yet.' };
+  }
   var face=inchesOf('i-face',5.0);
   var offset=inchesOf('i-offset',18);
   var ocEl=document.getElementById('i-oc');
@@ -4789,7 +5161,7 @@ function stgReadSetup(){
     var raw=(q.value||'').trim(); return raw!=='' && (parseInt(raw,10)||0)>0;
   });
   if(!lengths.length) lengths=[12,14,16];   // sensible default if none entered
-  return { face:face, truss:{ oc:oc, offsetIn:offset }, lengths:lengths };
+  return { mode:'panel', ok:true, face:face, truss:{ oc:oc, offsetIn:offset }, lengths:lengths };
 }
 /* ---------- one-time migration: stagger.jobs.v1 -> stagger.store.v1 ----------
    Nothing is written until the user taps "Bring my jobs across", and even then
@@ -5249,6 +5621,102 @@ function stgWireSupportBody(){
     }
   });
 })();
+/* ===========================================================================
+   Themed bottom sheet — one component, two users:
+     stgConfirmSheet()  replaces confirm() for destructive actions, and names
+                        exactly what is being deleted plus its details.
+     stgOpenMaterialSheet()  edits an area's material in place.
+   Built with textContent for anything user-supplied; no innerHTML for names.
+   =========================================================================== */
+function stgSheet(opts){
+  var prev = document.querySelector('.stgSheetWrap');
+  if(prev) prev.parentNode.removeChild(prev);
+
+  var wrap = document.createElement('div');
+  wrap.className = 'stgSheetWrap';
+  var box = document.createElement('div');
+  box.className = 'stgSheet';
+
+  var h = document.createElement('div'); h.className='stgSheetTitle';
+  h.textContent = opts.title; box.appendChild(h);
+
+  if(opts.subject){
+    var s = document.createElement('div'); s.className='stgSheetSubject';
+    var nm = document.createElement('div'); nm.className='nm';
+    nm.textContent = opts.subject.name; s.appendChild(nm);
+    if(opts.subject.detail){
+      var dt = document.createElement('div'); dt.className='dt';
+      dt.textContent = opts.subject.detail; s.appendChild(dt);
+    }
+    box.appendChild(s);
+  }
+  if(opts.body){
+    var b = document.createElement('div'); b.className='stgSheetBody';
+    b.textContent = opts.body; box.appendChild(b);
+  }
+  if(opts.options){
+    var list = document.createElement('div'); list.className='stgSheetOpts';
+    opts.options.forEach(function(o){
+      var btn = document.createElement('button');
+      btn.className = 'stgSheetOpt' + (o.current ? ' on' : '');
+      btn.textContent = o.label;
+      btn.addEventListener('click', function(){ close(); o.onPick(); });
+      list.appendChild(btn);
+    });
+    box.appendChild(list);
+  }
+
+  var row = document.createElement('div'); row.className='stgSheetRow';
+  var cancel = document.createElement('button');
+  cancel.className='stgSheetBtn'; cancel.textContent = opts.cancelLabel || 'Cancel';
+  cancel.addEventListener('click', function(){ close(); if(opts.onCancel) opts.onCancel(); });
+  if(opts.confirmLabel){
+    var go = document.createElement('button');
+    go.className='stgSheetBtn danger'; go.textContent = opts.confirmLabel;
+    go.addEventListener('click', function(){ close(); opts.onConfirm(); });
+    row.appendChild(cancel); row.appendChild(go);
+  } else {
+    row.appendChild(cancel);
+  }
+  box.appendChild(row);
+
+  function close(){ if(wrap.parentNode) wrap.parentNode.removeChild(wrap); }
+  wrap.addEventListener('click', function(e){
+    if(e.target === wrap){ close(); if(opts.onCancel) opts.onCancel(); }
+  });
+  wrap.appendChild(box);
+  document.getElementById('jobsOverlay').appendChild(wrap);
+  return close;
+}
+
+function stgConfirmSheet(o){ return stgSheet(o); }
+
+function stgOpenMaterialSheet(i){
+  if(!JOB || !JOB.areas || !JOB.areas[i]) return;
+  var a = JOB.areas[i];
+  var MATS = ['Hardwood','Laminate','Vinyl plank','Engineered','Tile','Pine T&G'];
+  var opts = MATS.map(function(m){
+    return { label:m, current:(!a.excluded && a.materialType===m), onPick:function(){ stgSetMaterial(i, m); } };
+  });
+  opts.push({ label:'Exclude (no material)', current:!!a.excluded,
+              onPick:function(){ stgSetMaterial(i, '__exclude'); } });
+  stgSheet({
+    title:'Material',
+    subject:{ name:a.name, detail:fmtSqft(a.sqft||0)+' sq ft' },
+    options:opts,
+    cancelLabel:'Close'
+  });
+}
+function stgSetMaterial(i, mat){
+  var a = JOB.areas[i]; if(!a) return;
+  // materialType and excluded are derived from the same choice in
+  // saveCurrentArea() — they must always be written together.
+  a.materialType = mat;
+  a.excluded = (mat === '__exclude');
+  persist();
+  renderJob();
+}
+
 function stgCloseJobs(){ var ov=document.getElementById('jobsOverlay'); if(ov) ov.hidden=true; }
 
 (function(){
@@ -5274,6 +5742,11 @@ function stgRenderBoardEstimate(){
   var box=document.getElementById('stgBoardEst');
   if(!box){ box=document.createElement('div'); box.id='stgBoardEst'; box.className='stgBoardEst'; host.appendChild(box); }
   var setup=stgReadSetup();
+  if(!setup.ok){
+    box.innerHTML = '<div class="esthead">Board estimate</div>'
+      + '<div class="stgShopNote">' + esc(setup.reason) + '</div>';
+    return;
+  }
   var lines='<div class="esthead">Board estimate <span class="stgsub">(uses your Setup: '
     + fmtIn(setup.face) + ' face, ' + setup.truss.oc + '\u2033 o.c., stock '
     + setup.lengths.map(function(f){return f+"\u2032";}).join('/') + ')</span></div>';
@@ -5281,7 +5754,11 @@ function stgRenderBoardEstimate(){
   JOB.areas.forEach(function(a){
     if(a.excluded) return;
     var ei=a.engineInput;
-    var usable = ei && ei.ok && (ei.kind==='rect' ? !!ei.rect : (ei.profile && ei.profile.bands && ei.profile.bands.length));
+    // Don't branch on kind: shapeToProfile sets kind==='rect' whenever
+    // bands.length<=1, including 0, while rect is only set when it is exactly 1.
+    // Branching on kind therefore reported 'draw to estimate' for shapes that
+    // WERE drawn. Ask what is actually usable instead.
+    var usable = ei && ei.ok && (!!ei.rect || (ei.profile && ei.profile.bands && ei.profile.bands.length > 0));
     if(!usable){
       lines+='<div class="estrow"><span class="em">'+esc(a.name)+'</span><span>'+fmtSqft(a.sqft||0)+' sq ft \u00b7 draw to estimate boards</span></div>';
       return;
