@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.25-1249';</script>
+<script>window.EGS_VERSION = '2026.07.26-1344';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -179,6 +179,36 @@
   .foot{font-size:10px;color:var(--paper-faint);text-align:center;padding:4px 0 2px}
 
   .echo{display:block;font-size:10px;color:var(--brass);margin-top:2px;min-height:12px}
+
+  /* ---- Welcome / first-open ----
+     One screen, two states: the sample offer when there are no jobs, the
+     Continue block when there are. No nav button — switchScreen just clears
+     .on from all five, which is correct here. */
+  #s-welcome{padding:24px 16px calc(24px + var(--safe-b))}
+  .welcome-h{margin:0 0 8px;font-family:var(--serif);font-size:27px;font-weight:600;
+    letter-spacing:.01em;line-height:1.25;color:var(--paper)}
+  .welcome-sub{margin:0 0 22px;font-size:14px;line-height:1.6;color:var(--paper-dim)}
+  .welcome-acts{display:flex;flex-direction:column;gap:10px}
+  .welcome-acts .btn{margin:0}
+  .welcome-quick{margin-top:18px;text-align:center;font-size:12.5px;color:var(--paper-faint)}
+  .welcome-quick button{background:none;border:none;padding:0;font:inherit;font-weight:700;
+    color:var(--brass);cursor:pointer;text-decoration:underline}
+  .continue-card{background:var(--ink-2);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px;margin-bottom:12px}
+  .continue-card .nm{font-size:17px;font-weight:700;color:var(--paper);word-break:break-word}
+  .continue-card .meta{font-size:12.5px;color:var(--paper-dim);margin-top:3px}
+
+  /* ---- Sample-room banner ----
+     The demo is read-only: ticking rows and Reshuffle are suppressed, because
+     egs-floor-progress is a single global slot and Reshuffle writes it
+     unconditionally — it would silently erase a real install's row ticks. */
+  .samplebar{background:var(--brass-fill);color:var(--on-brass);border-radius:var(--radius);
+    padding:12px 14px;margin-bottom:12px}
+  .samplebar .lab{font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+  .samplebar .msg{font-size:12.5px;line-height:1.55;margin-top:4px;opacity:.85}
+  .samplebar button{width:100%;margin-top:10px;min-height:var(--tap);padding:11px;
+    font:inherit;font-size:14.5px;font-weight:700;border-radius:var(--radius-sm);
+    border:1px solid var(--on-brass);background:transparent;color:var(--on-brass);cursor:pointer}
 
   /* ---- Settings controls ---- */
   .segrow{display:flex;gap:6px}
@@ -324,6 +354,9 @@
   @media print{
     header.top,nav.bottom,.modebar,.btn,.optbar,.diagwrap,
     .fl-ov,.fl-views,.fl-expand,.fl-done-btn,.fl-undo-btn,.fl-clear-btn{display:none !important}
+    /* .screen becomes display:block below so the whole document prints. The
+       welcome screen must be exempted or it lands on the user's cut sheet. */
+    #s-welcome,.samplebar{display:none !important}
     .screen{display:block !important;padding:0}
     body{background:var(--ink-2)}
     .card,.takeoff{border:none;padding:4px 0}
@@ -585,6 +618,41 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
     <div class="sub">Flooring layouts, stagger &amp; cut list</div>
     <button id="openJobs">☷ Jobs &amp; areas</button>
   </header>
+
+  <!-- ===== WELCOME / FIRST OPEN =====
+       One screen, two states. No nav button by design: switchScreen simply
+       clears .on from all five, which is right when you have not chosen a
+       destination yet. Exempted from the print stylesheet above. -->
+  <section class="screen" id="s-welcome">
+    <!-- returning: shown when the store has jobs -->
+    <div id="welcome-returning" hidden>
+      <p class="welcome-h">Welcome back</p>
+      <p class="welcome-sub">Pick up where you left off.</p>
+      <div class="continue-card">
+        <div class="nm" id="welcome-jobname">—</div>
+        <div class="meta" id="welcome-jobmeta"></div>
+      </div>
+      <div class="welcome-acts">
+        <button class="btn" id="welcome-continue">Continue this job</button>
+        <button class="btn ghost" id="welcome-alljobs">All jobs</button>
+        <button class="btn ghost" id="welcome-newjob">New job</button>
+      </div>
+    </div>
+
+    <!-- first open: shown when the store has no jobs -->
+    <div id="welcome-first" hidden>
+      <p class="welcome-h">See your new floor before you buy a board</p>
+      <p class="welcome-sub">Stagger works out where every plank and every joint goes, so the
+        pattern never repeats and you buy the right number of boxes.</p>
+      <div class="welcome-acts">
+        <button class="btn" id="welcome-sample">Show me a sample room</button>
+        <button class="btn ghost" id="welcome-start">Start my room — I'm ready to measure</button>
+      </div>
+    </div>
+
+    <p class="welcome-quick">Just need a number?
+      <button id="welcome-quick">Quick calc</button></p>
+  </section>
 
   <!-- ===== SETUP ===== -->
   <section class="screen active" id="s-setup">
@@ -1806,7 +1874,91 @@ $("btn-export-csv").addEventListener("click", doDownloadCSV);
   try{ paneling = localStorage.getItem("stagger.paneling") || "0"; }catch(e){}
   setMode(paneling==="1" ? "panel" : "floor", {quiet:true});
 })();
-switchScreen("s-setup");
+
+/* ---------------------------------------------------------------------------
+   Which screen do we open on?
+
+   The app used to open unconditionally onto the Setup form — ten fields and a
+   45' room nobody asked for. It now opens on #s-welcome, in one of two states:
+   the sample offer if the store has no jobs, "continue" if it does.
+
+   The signal is simply jobs.length. No new preference key: someone with no
+   jobs has nothing to continue, so the welcome IS their right screen, and
+   deleting every job restores it, which reads as intended rather than broken.
+
+   NOTE the scope trap: storeDoc() lives in the jobs IIFE further down the file,
+   which has not parsed yet. So this reads the key directly — the same thing the
+   <head> theme resolver does, and for the same reason. A corrupt store falls
+   through to the first-open state; the real loadStore() handles the corruption
+   properly when block 3 runs.
+   --------------------------------------------------------------------------- */
+function stgHasJobs(){
+  try{
+    var raw = localStorage.getItem("stagger.store.v1");
+    if(!raw) return false;
+    var s = JSON.parse(raw);
+    return !!(s && Array.isArray(s.jobs) && s.jobs.length);
+  }catch(e){ return false; }
+}
+(function bootScreen(){
+  var returning = stgHasJobs();
+  var r=$("welcome-returning"), f=$("welcome-first");
+  if(r) r.hidden = !returning;
+  if(f) f.hidden = returning;
+  switchScreen("s-welcome");
+})();
+
+/* ---------------------------------------------------------------------------
+   The sample room.
+
+   13'-0" x 11'-0", plank 60x9 — the same fixture test_fl_engine.js pins, so the
+   demo and the test share one source of truth and cannot drift apart. Eight of
+   the ten inputs are already the HTML defaults; only the room changes.
+   --------------------------------------------------------------------------- */
+var SAMPLE = { len:"13'-0", wid:"11'-0" };
+
+var SAMPLE_PREV_MODE = null;
+
+function stgShowSample(){
+  // switchScreen dispatches on MODE. A user with Paneling enabled would get the
+  // PANEL renderer painting an empty diagram, so force flooring for the demo.
+  // setMode PERSISTS stagger.paneling, so remember what it was and put it back
+  // on the way out — a demo must not quietly rewrite a saved preference.
+  SAMPLE_PREV_MODE = MODE;
+  setMode("floor", {quiet:true});
+  $("f-len-ft").value = SAMPLE.len;
+  $("f-wid-ft").value = SAMPLE.wid;
+  // keep the parsed echoes honest — they are wired to the input event
+  ["f-len-ft","f-wid-ft"].forEach(function(id){
+    $(id).dispatchEvent(new Event("input", {bubbles:true}));
+  });
+  if(!FL.showSample()) switchScreen("s-setup");   // bad input -> generate() alerted
+}
+
+// The one way out of the demo, called from the banner inside FL.
+window.stgExitSample = function(){
+  FL.exitSample();
+  // "Now do your room" means YOUR numbers. An empty field is an unambiguous
+  // invitation; leaving 13'x11' risks generating a layout for a room that
+  // isn't yours and not noticing. Plank/gap/stagger stay — those are sensible
+  // starting values, not the demo's.
+  $("f-len-ft").value = "";
+  $("f-wid-ft").value = "";
+  ["f-len-ft","f-wid-ft"].forEach(function(id){
+    $(id).dispatchEvent(new Event("input", {bubbles:true}));
+  });
+  clear($("layout-body")); clear($("cuts-body")); clear($("print-area"));
+  // restore the mode the user actually chose
+  if(SAMPLE_PREV_MODE && SAMPLE_PREV_MODE !== MODE) setMode(SAMPLE_PREV_MODE, {quiet:true});
+  SAMPLE_PREV_MODE = null;
+  switchScreen("s-setup");
+  try{ $("f-len-ft").focus(); }catch(e){}
+};
+
+(function stgWireWelcomeBase(){
+  var s=$("welcome-sample");  if(s) s.addEventListener("click", stgShowSample);
+  var q=$("welcome-quick");   if(q) q.addEventListener("click", function(){ switchScreen("s-setup"); });
+})();
 
 /* ===========================================================================
    SETTINGS — appearance, guidance, units, paneling mode
@@ -2186,6 +2338,18 @@ var FL = (function(){
   var S = { cfg:null, cands:[], active:0, box:null,
             view:"blueprint", done:{}, fp:null, jumpTo:null };
 
+  /* Sample-room mode. The demo shows a REAL layout from the real engine, but it
+     is a demonstration, not a job you are laying — so row ticking and Reshuffle
+     are off while it is on.
+
+     That is not cosmetic. egs-floor-progress is a single global slot, and
+     reshuffle() writes it unconditionally; its "you'll lose your ticks" confirm
+     is gated on hasProgress(), which reads THIS session's S.done — empty in a
+     demo. So a user mid-install who opened the sample out of curiosity and hit
+     Reshuffle would have their real row ticks erased with no warning. */
+  var sampleMode = false;
+  function inSample(){ return sampleMode; }
+
   function readInputs(){
     var gap = measIn("f-gap");
     var runIn = measIn("f-len-ft") - 2*gap;
@@ -2235,8 +2399,27 @@ var FL = (function(){
     switchScreen("s-layout");
   }
 
+  // The sample room: the same engine, the same renderers, read-only.
+  function showSample(){
+    sampleMode = true;
+    generate();                 // reads the f-* inputs the caller has just set
+    if(!S.cands.length){        // generate() alerts and bails on bad input
+      sampleMode = false;
+      return false;
+    }
+    S.done = {};                // never inherit a real install's ticks
+    renderLayout();
+    renderCuts();
+    return true;
+  }
+  function exitSample(){ sampleMode = false; }
+
   function reshuffle(){
     if (!S.cands.length) return;
+    // Belt and braces: the button is not rendered in sample mode, but this is
+    // the call that would clobber a real install's saved ticks, so guard it here
+    // too rather than relying on the UI alone.
+    if (inSample()) return;
     // A different layout means the row numbers mean something different. Say so
     // before the ticks are thrown away, rather than after.
     if (hasProgress()){
@@ -2285,6 +2468,7 @@ var FL = (function(){
   function hasProgress(){ return doneCount() > 0; }
 
   function toggleRow(n){
+    if (inSample()) return;     // a sample room is not something you install from
     if (S.done[n]) delete S.done[n]; else S.done[n] = true;
     saveProgress();
     refreshWake();
@@ -2676,6 +2860,22 @@ var FL = (function(){
   }
 
   // ---------- layout screen ----------
+
+  // The sample banner. Built with textContent, and carries the one way out.
+  function sampleBanner(cfg){
+    var b=el("div","samplebar");
+    var lab=el("div","lab");
+    lab.textContent = "Sample room \u2014 13'-0\" \u00d7 11'-0\"";
+    var msg=el("div","msg");
+    msg.textContent = "A real layout from the real engine \u2014 but a demonstration, "
+                    + "so ticking rows and Reshuffle are off here.";
+    var go=el("button"); go.type="button";
+    go.textContent = "Now do your room \u2192";
+    go.addEventListener("click", function(){ if(window.stgExitSample) window.stgExitSample(); });
+    b.appendChild(lab); b.appendChild(msg); b.appendChild(go);
+    return b;
+  }
+
   function renderLayout(){
     var body=$("layout-body"); clear(body);
     if (!S.cands.length){
@@ -2683,6 +2883,7 @@ var FL = (function(){
       return;
     }
     var cand=S.cands[S.active], cfg=S.cfg;
+    if (inSample()) body.appendChild(sampleBanner(cfg));
 
     var card=el("div","card");
     var lbl=el("p","lbl"); lbl.textContent="Layout "+(S.active+1)+" of "+Math.min(S.cands.length,6);
@@ -2737,10 +2938,12 @@ var FL = (function(){
     grid.appendChild(statBox(inch(cfg.edgeRip), "First / last row"));
     stats.appendChild(grid);
 
-    var btn=el("button","btn");
-    btn.textContent="Reshuffle";
-    btn.addEventListener("click", reshuffle);
-    stats.appendChild(btn);
+    if (!inSample()){
+      var btn=el("button","btn");
+      btn.textContent="Reshuffle";
+      btn.addEventListener("click", reshuffle);
+      stats.appendChild(btn);
+    }
     body.appendChild(stats);
 
     var chk=el("div","card");
@@ -2829,6 +3032,7 @@ var FL = (function(){
       return;
     }
     var cand=S.cands[S.active], cfg=S.cfg;
+    if (inSample()) body.appendChild(sampleBanner(cfg));
     var cur = currentRow();
 
     var head=el("div","card");
@@ -2846,10 +3050,12 @@ var FL = (function(){
       sub.textContent = r.src;
       head.appendChild(sub);
 
-      var done=el("button","fl-done-btn");
-      done.textContent = "\u2713  Row " + cur + " complete";
-      done.addEventListener("click", function(){ toggleRow(cur); });
-      head.appendChild(done);
+      if (!inSample()){
+        var done=el("button","fl-done-btn");
+        done.textContent = "\u2713  Row " + cur + " complete";
+        done.addEventListener("click", function(){ toggleRow(cur); });
+        head.appendChild(done);
+      }
     } else {
       var p=el("p"); p.style.fontSize="13px"; p.style.color="var(--paper-dim)"; p.style.margin="0";
       p.textContent = "Every row is ticked off. Tap any row below to reopen it.";
@@ -2891,10 +3097,14 @@ var FL = (function(){
 
   function cutRow(r, cfg, cur){
     var isDone = !!S.done[r.n], isNow = (r.n === cur);
-    var cls = "fl-row fl-tapzone" + (isDone ? " done" : "") + (isNow ? " now" : "");
+    // In sample mode the row is not a tap target at all. toggleRow() is guarded
+    // too, but a row that LOOKS tappable and silently does nothing is exactly
+    // the kind of dishonest failure this app is written against.
+    var cls = "fl-row" + (inSample() ? "" : " fl-tapzone")
+            + (isDone ? " done" : "") + (isNow ? " now" : "");
     var row=el("div", cls);
     row.id = "fl-r-" + r.n;
-    row.addEventListener("click", function(){ toggleRow(r.n); });
+    if (!inSample()) row.addEventListener("click", function(){ toggleRow(r.n); });
 
     var n=el("div", isDone ? "fl-rn tick" : "fl-rn");
     n.textContent = isDone ? "\u2713" : String(r.n);
@@ -3023,6 +3233,9 @@ var FL = (function(){
 
   return {
     generate: generate,
+    showSample: showSample,
+    exitSample: exitSample,
+    inSample: inSample,
     renderLayout: renderLayout,
     renderCuts: renderCuts,
     buildPrintArea: buildPrintArea,
@@ -4973,7 +5186,7 @@ function renderJobs(){
     var n=(j.areas||[]).length;
     return '<div class="arearow" data-jobid="'+esc(j.id)+'">'
       + '<div class="info"><div class="an">'+esc(j.name)+'</div>'
-      + '<div class="am">'+n+' area'+(n===1?'':'s')+' \u00b7 '+fmtSqft(jobSqft(j))+' sq ft \u00b7 '+fmtWhen(j.updated)+'</div></div>'
+      + '<div class="am">'+n+' area'+(n===1?'':'s')+' \u00b7 '+fmtSqft(jobSqft(j))+' sq ft \u00b7 '+fmtWhen(j.updatedAt)+'</div></div>'
       + '<button class="ghost rn" data-jrename="'+i+'" aria-label="Rename">\u270e</button>'
       + '<button class="ghost del" data-jdel="'+esc(j.id)+'">Delete</button></div>';
   }).join('');
@@ -5638,6 +5851,45 @@ function stgWireSupportBody(){
     });
   });
 }
+/* ---------------------------------------------------------------------------
+   Welcome screen — the half that needs the jobs closure.
+
+   The boot decision and the sample demo live in script block 1 (they need
+   switchScreen/setMode/FL). Continue/All jobs/New job/Start my room need JOB,
+   createJob and startNewArea, which are private to this IIFE — so they are
+   wired here rather than exporting the jobs internals onto window.
+   --------------------------------------------------------------------------- */
+(function stgWireWelcomeJobs(){
+  var jb = JOB;                       // set at parse time by loadCurrentJob()
+  var nm = document.getElementById('welcome-jobname');
+  var mt = document.getElementById('welcome-jobmeta');
+  if(jb && nm){
+    nm.textContent = jb.name || 'Untitled job';
+    var n = (jb.areas||[]).length;
+    var bits = [n + ' area' + (n===1?'':'s'), fmtSqft(jobSqft(jb)) + ' sq ft'];
+    var when = fmtWhen(jb.updatedAt);
+    if(when) bits.push(when);
+    if(mt) mt.textContent = bits.join(' \u00b7 ');
+  }
+  function openOverlayAt(fn){ stgOpenJobs(); if(fn) fn(); }
+
+  var c = document.getElementById('welcome-continue');
+  if(c) c.addEventListener('click', function(){
+    openOverlayAt(function(){ if(JOB) openJobView(); else showJobs(); });
+  });
+  var a = document.getElementById('welcome-alljobs');
+  if(a) a.addEventListener('click', function(){ openOverlayAt(showJobs); });
+  var nj = document.getElementById('welcome-newjob');
+  if(nj) nj.addEventListener('click', function(){ openOverlayAt(createJob); });
+
+  // First open: straight into a new job's first area, which is as far as the
+  // flow currently goes. The per-area layout join is Stage 3.
+  var s = document.getElementById('welcome-start');
+  if(s) s.addEventListener('click', function(){
+    openOverlayAt(function(){ createJob(); startNewArea(); });
+  });
+})();
+
 (function stgWireSupport(){
   var b=document.getElementById('openSupport');
   if(b) b.addEventListener('click', showSupport);
