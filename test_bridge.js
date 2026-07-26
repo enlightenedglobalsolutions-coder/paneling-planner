@@ -3,28 +3,20 @@
 // per-edge measurements (grid length x 12 = 1 cell -> 1 ft) and checks the
 // resulting engine input.
 
-var fs=require('fs');
-// Pull the grid-geometry engine straight out of the SHIPPED app file.
-// (This harness used to read a prototype, stagger-shape-input.html, that was
-//  never in this repo — so it could not run at all. index.html is the better
-//  source anyway: it tests what actually ships.)
-var html=fs.readFileSync('index.html','utf8');
-var START='function rectsToCells(rects){', END='//  EGS Measurement Widget';
-var i=html.indexOf(START), j=html.indexOf(END, i);
-if(i<0 || j<0){
-  console.error("FAIL: could not locate the grid-geometry block in index.html.");
-  console.error("      Anchors: "+JSON.stringify(START)+" .. "+JSON.stringify(END));
-  process.exit(1);
-}
-var engine=html.slice(i, j);
-// guard: this slice must stay pure — the moment it touches the DOM it stops
-// being testable in node, and we want to hear about that as a failure, not a crash.
-if(/document\.|window\.|localStorage/.test(engine)){
-  console.error("FAIL: the grid-geometry block in index.html now touches the DOM; "
-              + "extract it to a module rather than widening this harness.");
-  process.exit(1);
-}
-eval(engine);
+// The grid-geometry engine now comes from engine_source.js, which resolves it
+// MODULE-FIRST and falls back to slicing the SHIPPED index.html. That indirection
+// is the point: when the block is extracted to grid_geom.js in a later stage,
+// this harness keeps passing untouched — it simply stops slicing and starts
+// requiring. All the loud-failure guards that used to live here (anchors moved,
+// slice no longer pure) moved into the loader with it.
+//
+// It also widened the slice to start at snapToGrid: allConnected sits inside the
+// block and CALLS rectsAdjacent, which was just outside the old range. Nothing
+// exercised it, so it worked by luck.
+var E=require('./engine_source.js');
+var grid=E.load('grid');
+var rectsToCells=grid.rectsToCells, traceOutline=grid.traceOutline;
+
 var bridge=require('./bridge.js');
 var buildEngineInput=bridge.buildEngineInput, shapeToProfile=bridge.shapeToProfile;
 

@@ -114,23 +114,89 @@ maskable icon 404s.
 
 ## Test harnesses
 
-All 11 harnesses pass (7 at root, 4 in `v2-modules/`). Every one is a plain `require()` of its
-module **except `test_bridge.js`**, which is a *slicer*: it cuts the grid-geometry block out of
-`index.html` between `function rectsToCells(rects){` and `//  EGS Measurement Widget` and tests
-**that**, so it fails if the shipped file drifts.
+**Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
+if every suite passes, so it is safe in front of a deploy. 13 suites, 506 assertions.
+
+### `engine_source.js` — how harnesses get at an engine
+
+Stagger's engines live inside `index.html`. They are pure, so a harness can slice them out and run
+them in node. Doing that per-harness means the day an engine is extracted to a module, every
+harness that sliced it breaks at once. So `engine_source.js` resolves **module-first,
+slice-fallback**:
+
+```js
+var E = require('./engine_source.js');
+var FL = E.load('fl');     // -> require('./fl_engine.js') if it exists
+                           // -> else slice index.html between anchors
+```
+
+Registered engines: `grid`, `fl`, `panel`. **Extracting an engine to a module is a no-op for the
+tests** — proven: writing `grid_geom.js` flips `test_bridge.js` from the slice path to the module
+path with no harness edit and the same 16/16.
+
+The loader fails **loudly and exits 1 before any assertion**, so a harness that cannot load its
+engine never prints a misleading "0 passed, 0 failed". It rejects a missing anchor, an **ambiguous**
+anchor (appearing more than once — an ambiguous slice can silently take the wrong code), a slice
+that has started touching the DOM, and a partial extraction.
+
+Two things the registry encodes that are easy to trip over:
+
+- **The paneling engine is not contiguous.** `assignStock`, `computeTakeoff` and `planOffcuts` sit
+  *outside* its own `PANELING ENGINE END` marker, and all three need `rowName()` ~500 lines further
+  down. Five anchored ranges, concatenated.
+- **`generateOptions` is not pure.** It reads the module global `LONGEST_STOCK` and **overrides its
+  own `capIn` parameter with it**, so the same call returns different results depending on whether
+  `generate()` ran first. The loader declares the binding and exposes `setLongestStock()`; tests set
+  it per case. The impurity only bites when the value crosses a joint-count boundary, which is
+  exactly why it went unnoticed.
+
+### The two engine suites are CHARACTERISATION suites
+
+`test_fl_engine.js` (105) and `test_panel_engine.js` (96) pin what the engines do **today**, so the
+v3 restructure has to answer one question: *did the layout the user sees change?* They are not
+specifications. **Where the engine has a defect, the defect is pinned and labelled `KNOWN DEFECT`,
+not corrected — when it is fixed, those tests SHOULD fail, and get flipped to assert the new
+behaviour.** Currently pinned:
+
+- `plankLen 4` + `minOff 3` passes the UI guard (`4 <= 3` is false) then throws `TypeError` on row 2,
+  because `legalStarts` finds nothing below `MIN_FRESH` and the fallback dereferences null.
+- The rip bump adds one row with no re-check, so `edgeRip` can end up **below** the `minRip` warranty
+  floor the engine just tried to enforce.
+- `generateOptions` returns an option reporting `illegal:0` when no legal joint row exists at all —
+  only the `label` string reveals it.
+- `rowJoints` arrays are **shared** across rows and across options, and `option.unit === option.rowJoints`.
+  Reading is safe; any `push`/`sort`/`splice` by a consumer corrupts several options at once.
+
+Both engines are deterministic (seeded LCG, no `Math.random`, no clock), so goldens pin exact output.
+Each fixture pins three layers: a **readable start sequence**, the **candidate metrics**, and a
+**full-structure digest** as backstop. That split earns its keep — a `MIN_FRESH 6→7` perturbation
+changes the candidate set but not the winning starts, and only the digest catches it.
+
+**Order is pinned only where the ranking comparator separates every pair.** The suite measures tie
+exposure at run time; where ties exist the winner depends on seed-loop insertion order, so those
+fixtures pin the *set* and the invariants instead. Reading a failure: starts changed on a zero-tie
+fixture ⇒ real behaviour changed; starts changed on a tie-exposed fixture ⇒ suspect loop or sort
+order first; digest-only change ⇒ something outside the projection moved.
+
+
+
+All 13 harnesses pass. Most are a plain `require()` of a module; `test_bridge.js`,
+`test_fl_engine.js` and `test_panel_engine.js` get their code through `engine_source.js` (above),
+so they test **what actually ships** and fail if the shipped file drifts.
 
 `test_bridge.js` is current and passing (16/16). Its header mentions a `stagger-shape-input.html`
 prototype **in the past tense** — that fixture was never in this repo, and the harness was
 repointed at `index.html` in `e4dda67`. Don't read that comment as a live dependency and don't
 "fix" the harness again.
 
-Two known gaps, neither actioned:
-- The slice starts at `rectsToCells`, but `allConnected` (inside the slice) calls `rectsAdjacent`
-  (defined just *outside* it). Nothing tests `allConnected`, so it never fires; a future test that
-  does will get a `ReferenceError`, not a real failure. Move the START anchor to
-  `function rectsAdjacent(a, b){` if that day comes.
-- Nothing slices the inlined `bridge.js` / `spread.js` / `lshape.js` blocks — only the grid engine.
-  Those three are kept in sync by hand, not by test.
+The old `allConnected` / `rectsAdjacent` gap is **closed**: the grid slice now starts at
+`function snapToGrid(v, grid){`, so `allConnected` can actually be called. It could not be before —
+`rectsAdjacent` sat outside the range and any test touching it would have got a `ReferenceError`
+rather than a real failure.
+
+Still open: nothing slices the inlined `bridge.js` / `spread.js` / `lshape.js` blocks — only the
+grid engine and the two layout engines. Those three are kept in sync by hand, not by test
+(`reinline.py` does not cover them). Adding them to the `engine_source.js` registry is the cheap fix.
 
 ## Persistence
 
