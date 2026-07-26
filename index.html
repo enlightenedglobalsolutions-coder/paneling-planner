@@ -1,6 +1,6 @@
 <!--
 =============================================================================
-  EGS Paneling Layout Planner
+  Stagger — flooring layout planner
   A product of Enlightened Global Solutions (EGS)
 
   Copyright (c) 2026 Enlightened Global Solutions
@@ -10,15 +10,21 @@
   of this software is strictly prohibited.
 
   Website:  https://enlightenedglobalsolutions-coder.github.io/paneling-planner
+            (repo name predates the rename to Stagger; the Pages URL is live
+             and changing it would break every existing link)
   License:  See LICENSE file for full terms
 =============================================================================
-  v2 — symmetry-first engine, stock-with-quantities, segregated offcut pools,
-  shortage warnings. Paneling mode.
+  Flooring is the product. Stagger's engine enumerates legal row starts,
+  enforces two-row clearance, chains skip-a-row offcut reuse and ranks
+  multi-seed candidates; it reports pack/box counts and box-rotation guidance.
+  Kept as a separable block between the FLOORING MODULE markers.
 
-  v2.1 — FLOORING MODULE. Stagger engine with enumerated legal starts, two-row
-  clearance enforcement, skip-a-row offcut chain, multi-seed candidate ranking.
-  Pack/box counts and box-rotation guidance. Kept as a separable block between
-  the FLOORING MODULE markers for later extraction to a standalone app.
+  Paneling (ceiling/wall boards on trusses) is a secondary mode, off by
+  default, opt-in from Settings. Its v2 engine is symmetry-first with
+  stock-quantities, segregated offcut pools and shortage warnings.
+
+  Both engines are pure and characterised — see test_fl_engine.js and
+  test_panel_engine.js, loaded via engine_source.js.
 =============================================================================
 -->
 <!DOCTYPE html>
@@ -3196,7 +3202,7 @@ $("f-btn-generate").addEventListener("click", FL.generate);
 /* ===== STAGGER JOBS OVERLAY (Path A merge) ===== */
 (function(){
 "use strict";
-/* ---- spread.js ---- */
+/* ==== spread.js (inlined) — REFRESHED BY reinline.py. Edit spread.js, not here. ==== */
 // ============================================================================
 //  Stagger v2 — spread.js  (Slice 3: board-length spread runner)
 //  For each available stock length, run the EXISTING layout engine and collect
@@ -3290,7 +3296,8 @@ function shoppingList(byLen){
     .map(function(ft){ return byLen[ft] + "\u00d7 " + ft + "'"; });
   return parts.join("  +  ");
 }
-/* ---- lshape.js ---- */
+/* ==== end spread.js ==== */
+/* ==== lshape.js (inlined) — REFRESHED BY reinline.py. Edit lshape.js, not here. ==== */
 // ============================================================================
 //  Stagger v2 — lshape.js  (Slice 3b: L-shaped areas as run profiles)
 //  An area is an ordered list of DEPTH BANDS, each with its own run length and
@@ -3400,6 +3407,7 @@ function lshapeCutList(layout, trussesForRun){
     return { row: idx+1, band: r.band, runIn: r.runIn, runStartIn: r.runStartIn, joints: r.joints };
   });
 }
+/* ==== end lshape.js ==== */
 /* ---- v2 engine adapter ---- */
 // v2 engine adapter (Path A) — bridges the REAL paneling engine to the
 // injected-engine contract spread.js / lshape.js expect. Uses the base app's
@@ -3723,7 +3731,28 @@ if (typeof module !== "undefined") module.exports = {
 };
 
 
-// traced outline + measured sides -> layout-engine input. Pure, tested (16/16).
+/* ==== bridge.js (inlined) — REFRESHED BY reinline.py. Edit bridge.js, not here. ==== */
+// ============================================================================
+//  Stagger BRIDGE — traced shape + measured sides  ->  layout-engine input
+//  ---------------------------------------------------------------------------
+//  Turns the shape-input outline (grid edges from grid_shape.traceOutline) plus
+//  the per-side real measurements (INCHES, one per edge) into what the layout
+//  engine consumes:
+//     rectangle   ->  { runIn, acrossIn }                         (spread.runSpread)
+//     L / stepped ->  { kind:'L', bands:[{depthIn,runIn,runStartIn}] }  (generateLShape)
+//
+//  Rules baked in (Edwin, July 2026):
+//   - Measurements are FINAL wall-to-wall (inside) dims — used as-is (no
+//     outside->inside conversion here; inside_dims.js runs upstream if needed).
+//   - Run direction is AUTO (boards run the longer wall) but can be OVERRIDDEN;
+//     auto also prefers whichever axis yields a clean single-interval band
+//     profile, so an L/U/T that splits one way is sliced the other way.
+//
+//  Pure geometry, no DOM. Testable headless.
+// ============================================================================
+
+// Walk the directed outline, moving each edge's measured length in its unit
+// direction, to reconstruct the real orthogonal polygon (vertices in inches).
 function reconstructPolygon(edges, inchesArr){
   if(!edges || !edges.length) return { ok:false, error:"no-edges" };
   var x=0, y=0, verts=[{x:0,y:0}];
@@ -3735,10 +3764,12 @@ function reconstructPolygon(edges, inchesArr){
     x += dx*len; y += dy*len;
     verts.push({ x:x, y:y });
   }
-  var closed = Math.abs(x) < 0.5 && Math.abs(y) < 0.5;
-  verts.pop();
+  var closed = Math.abs(x) < 0.5 && Math.abs(y) < 0.5; // returns near origin
+  verts.pop(); // drop the closing point (~ origin) -> corner list
   return { ok:true, verts:verts, closed:closed };
 }
+
+// cluster near-equal coordinate values into shared breakpoints (measurement drift)
 function _cluster(vals, tol){
   var s=vals.slice().sort(function(a,b){return a-b;}), out=[], cur=[s[0]];
   for(var i=1;i<s.length;i++){
@@ -3750,6 +3781,9 @@ function _cluster(vals, tol){
 }
 function _avg(a){ var t=0; for(var i=0;i<a.length;i++) t+=a[i]; return t/a.length; }
 function _round(v){ return Math.round(v*1000)/1000; }
+
+// run-intervals the polygon covers at a given depth level (ray-cast, even-odd).
+// depthKey/runKey are 'x'/'y'; we cross edges parallel to the DEPTH axis.
 function _coverageAt(verts, scan, depthKey, runKey){
   var xs=[], n=verts.length;
   for(var i=0;i<n;i++){
@@ -3764,6 +3798,8 @@ function _coverageAt(verts, scan, depthKey, runKey){
   for(var j=0;j+1<xs.length;j+=2) iv.push([xs[j], xs[j+1]]);
   return iv;
 }
+
+// Decompose the reconstructed polygon into a run profile for one run axis.
 function shapeToProfile(edges, inchesArr, runAxis){
   var rp=reconstructPolygon(edges, inchesArr);
   if(!rp.ok) return rp;
@@ -3774,19 +3810,22 @@ function shapeToProfile(edges, inchesArr, runAxis){
   if(runAxis!=='x' && runAxis!=='y') runAxis = (w>=h) ? 'x' : 'y';
   var runKey=runAxis, depthKey=(runAxis==='x')?'y':'x';
   var runMin=(runAxis==='x')?minx:miny;
+
   var depthVals=verts.map(function(p){ return p[depthKey]; });
   var breaks=_cluster(depthVals, 0.25);
+
   var bands=[], warnings=[], complex=false;
   for(var i=0;i+1<breaks.length;i++){
     var lo=breaks[i], hi=breaks[i+1], mid=(lo+hi)/2;
     var ivs=_coverageAt(verts, mid, depthKey, runKey);
-    if(ivs.length===0) continue;
+    if(ivs.length===0) continue;                    // concave notch: no material
     if(ivs.length>1){ complex=true;
       warnings.push("Depth "+_round(lo)+"-"+_round(hi)+"\" splits into "+ivs.length+" separate runs on this axis.");
     }
     var iv=ivs[0];
     bands.push({ depthIn:_round(hi-lo), runIn:_round(iv[1]-iv[0]), runStartIn:_round(iv[0]-runMin) });
   }
+
   var kind = complex ? 'complex' : (bands.length<=1 ? 'rect' : 'L');
   var out = {
     ok:true, runAxis:runAxis, closed:rp.closed, kind:kind,
@@ -3798,6 +3837,9 @@ function shapeToProfile(edges, inchesArr, runAxis){
   if(!rp.closed) out.warnings.push("Measured sides don't perfectly close the shape.");
   return out;
 }
+
+// Top-level: auto-pick run axis (longer wall, but prefer a clean profile),
+// unless overrideAxis ('x'|'y') is given.
 function buildEngineInput(edges, inchesArr, overrideAxis){
   if(overrideAxis==='x' || overrideAxis==='y') return shapeToProfile(edges, inchesArr, overrideAxis);
   var rp=reconstructPolygon(edges, inchesArr);
@@ -3815,7 +3857,7 @@ function buildEngineInput(edges, inchesArr, overrideAxis){
   }
   return A;
 }
-
+/* ==== end bridge.js ==== */
 
 /* ---------- shape presets (in grid cells) ---------- */
 var PRESETS = {

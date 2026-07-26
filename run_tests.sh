@@ -20,7 +20,7 @@ if [ -t 1 ]; then R='\033[0;31m'; G='\033[0;32m'; DIM='\033[2m'; N='\033[0m'
 else R=''; G=''; DIM=''; N=''; fi
 
 FILTER="${1:-}"
-suites=$(ls test_*.js v2-modules/test_*.js 2>/dev/null | sort)
+suites=$(ls test_*.js 2>/dev/null | sort)
 [ -n "$FILTER" ] && suites=$(echo "$suites" | grep -- "$FILTER")
 
 if [ -z "$suites" ]; then

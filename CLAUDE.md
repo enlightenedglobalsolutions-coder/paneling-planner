@@ -5,33 +5,51 @@ Extends the EGS working standards in `../../CLAUDE.md`. Only repo-specific rules
 ## Inlined modules — re-inline before testing or deploying
 
 `index.html` is a single self-contained file (no `<script src>`), so the tested modules are
-**copied into it**, not linked. Five modules are inlined, in two different ways:
+**copied into it**, not linked. Six modules are inlined, in two styles — and since 2026-07-26
+**`reinline.py` covers all six**:
 
-| Module | Inlined as | Tested by | Refreshed by `reinline.py`? |
-|---|---|---|---|
-| `store.js` | `StaggerStore` IIFE | `test_store.js`, `test_jobs.js` | **yes** |
-| `migrate_jobs.js` | `StaggerMigrate` IIFE | `test_persist.js` | **yes** |
-| `diagnose.js` | `StaggerDiag` IIFE | `test_diagnose.js` | **yes** |
-| `spread.js` | bare, `/* ---- spread.js ---- */` | `v2-modules/test_spread.js` | no — by hand |
-| `lshape.js` | bare, `/* ---- lshape.js ---- */` | `test_lshape.js` | no — by hand |
-| `bridge.js` | bare | `test_bridge.js` | no — by hand |
+| Module | Inlined as | Tested by |
+|---|---|---|
+| `store.js` | `StaggerStore` IIFE | `test_store.js`, `test_jobs.js` |
+| `migrate_jobs.js` | `StaggerMigrate` IIFE | `test_persist.js` |
+| `diagnose.js` | `StaggerDiag` IIFE | `test_diagnose.js` |
+| `spread.js` | bare, between `/* ==== spread.js (inlined) ... ==== */` sentinels | `test_spread.js` |
+| `lshape.js` | bare, between sentinels | `test_lshape.js` |
+| `bridge.js` | bare, between sentinels | `test_bridge.js` |
 
 (`inside_dims.js` is **not** inlined — it has no consumer in `index.html` yet.)
 
-**After editing `store.js`, `migrate_jobs.js` or `diagnose.js`, run `python3 reinline.py` before
-testing or deploying.** It rewrites those blocks from the modules on disk, takes a timestamped backup,
-and is idempotent — running it with no module changes is a 0-byte edit.
-
-The other three were inlined by hand and `index.html` wraps them in adapters it does not share
-(e.g. `v2RunSpread` around `runSpread`). **`reinline.py` deliberately leaves them alone** — a blind
-refresh would clobber those adapters. If you edit one, port the change into `index.html` by hand
-and confirm it landed.
+**After editing ANY of those six, run `python3 reinline.py` before testing or deploying.** It
+rewrites every block from the modules on disk, takes a timestamped backup, and is idempotent —
+running it with no module changes is a 0-byte edit.
 
 Skipping it means the harnesses pass against `store.js` while `index.html` still carries the
 old code, and the app ships something no test has ever run. The gap is silent: nothing fails,
 the tests are just no longer testing what ships.
 
-Also keep `store.js` and `v2-modules/store.js` byte-identical (`diff store.js v2-modules/store.js`).
+### Why the bare three were added (Stage 0, 2026-07-26)
+
+`spread.js`, `lshape.js` and `bridge.js` used to be copied **by hand**, so `test_bridge.js` tested
+`bridge.js` on disk while the app ran a hand-copied inline version. They happened to be in sync —
+by hand, not by proof. They are now regenerated, so drift is impossible by construction. Verified
+by injecting a hand-edit into the inlined bridge copy and watching `reinline.py` repair it.
+
+The bare blocks sit between **sentinels `reinline.py` writes and regenerates**:
+
+```
+/* ==== bridge.js (inlined) — REFRESHED BY reinline.py. Edit bridge.js, not here. ==== */
+   ...module source, minus its module.exports block...
+/* ==== end bridge.js ==== */
+```
+
+They exist because the obvious anchor — the module's own first comment — is destroyed by the very
+rewrite that needs it. Don't hand-edit between them; the next `reinline.py` will overwrite it. The
+adapters the old note warned about (`v2RunSpread` around `runSpread`) sit **outside** the sentinels
+and are untouched.
+
+Note the export-stripping regex is deliberately tolerant of spacing: `bridge.js` writes
+`if (typeof module !== "undefined")` and `spread.js` writes it without spaces. A fixed-string
+separator silently misses one of them.
 
 To prove the inlined copies match the modules, extract them back out of `index.html` and run the
 real harnesses against the extracted code — that is the check that catches drift.
@@ -115,7 +133,20 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 13 suites, 506 assertions.
+if every suite passes, so it is safe in front of a deploy. 10 suites, 447 assertions.
+
+### `v2-modules/` is gone (Stage 0, 2026-07-26)
+
+It held byte-identical copies of `store.js`, `lshape.js`, `spread.js`, `inside_dims.js` and three
+of their tests — 59 duplicated assertions that could drift from the originals and prove nothing if
+they did. Retired to `_old/v2-modules/` (gitignored, still on disk), along with two historical
+prototypes (`stagger-v2-index.html`, `stagger-grid-demo.html`).
+
+**One file was NOT a duplicate: `test_spread.js` was the only coverage `spread.js` had anywhere.**
+It was promoted to the repo root rather than archived. Deleting the directory wholesale — which is
+what the audit's Stage 0 line originally said — would have silently dropped it.
+
+Assertion count went 506 → 447, which is exactly the 59 duplicates (10 + 23 + 26). No coverage lost.
 
 ### `engine_source.js` — how harnesses get at an engine
 
@@ -180,7 +211,7 @@ order first; digest-only change ⇒ something outside the projection moved.
 
 
 
-All 13 harnesses pass. Most are a plain `require()` of a module; `test_bridge.js`,
+All 10 harnesses pass. Most are a plain `require()` of a module; `test_bridge.js`,
 `test_fl_engine.js` and `test_panel_engine.js` get their code through `engine_source.js` (above),
 so they test **what actually ships** and fail if the shipped file drifts.
 
