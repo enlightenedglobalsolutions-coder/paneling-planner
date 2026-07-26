@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.26-1344';</script>
+<script>window.EGS_VERSION = '2026.07.26-1359';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -651,7 +651,13 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
     </div>
 
     <p class="welcome-quick">Just need a number?
-      <button id="welcome-quick">Quick calc</button></p>
+      <button id="welcome-quick">Quick calc</button><!--
+      Returning users never see the sample offer above, but the person most
+      likely to want it is you, showing Stagger to someone at the shop. This
+      path snapshots and restores the room fields; the first-open one clears
+      them. -->
+      <span id="welcome-sample-wrap" hidden> &middot;
+        <button id="welcome-sample-link">Sample room</button></span></p>
   </section>
 
   <!-- ===== SETUP ===== -->
@@ -1905,6 +1911,8 @@ function stgHasJobs(){
   var r=$("welcome-returning"), f=$("welcome-first");
   if(r) r.hidden = !returning;
   if(f) f.hidden = returning;
+  // first-open users already have the sample as a primary button
+  var sw=$("welcome-sample-wrap"); if(sw) sw.hidden = !returning;
   switchScreen("s-welcome");
 })();
 
@@ -1918,46 +1926,85 @@ function stgHasJobs(){
 var SAMPLE = { len:"13'-0", wid:"11'-0" };
 
 var SAMPLE_PREV_MODE = null;
+var SAMPLE_PREV_ROOM = null;   // the two fields the demo overwrites
+var SAMPLE_ENTRY = "first";    // "first" = the sample offer | "welcome" = the returning link
 
-function stgShowSample(){
+/* The demo has TWO callers and they want opposite exits.
+
+   From the first-open offer, the demo is the pitch: leaving it means "now do
+   your room", so the room fields are cleared as an invitation.
+
+   From the returning link, the demo is a show-and-tell — you are demonstrating
+   Stagger to a customer at the shop, not starting a job. Leaving it must put
+   things back exactly as they were and return you to where you came from.
+
+   Hence the snapshot. Setup fields are not persisted today, so on a fresh load
+   they hold the HTML defaults and this restores defaults to defaults — it is
+   insurance, not a live fix. It stops being theoretical the moment those fields
+   are remembered (Stage 4 moves these parameters into the job flow), and it
+   costs two lines. */
+function stgShowSample(entry){
+  SAMPLE_ENTRY = (entry === "welcome") ? "welcome" : "first";
+  SAMPLE_PREV_ROOM = { len:$("f-len-ft").value, wid:$("f-wid-ft").value };
   // switchScreen dispatches on MODE. A user with Paneling enabled would get the
   // PANEL renderer painting an empty diagram, so force flooring for the demo.
   // setMode PERSISTS stagger.paneling, so remember what it was and put it back
   // on the way out — a demo must not quietly rewrite a saved preference.
   SAMPLE_PREV_MODE = MODE;
   setMode("floor", {quiet:true});
-  $("f-len-ft").value = SAMPLE.len;
-  $("f-wid-ft").value = SAMPLE.wid;
+  stgSetRoom(SAMPLE.len, SAMPLE.wid);
+  if(!FL.showSample()) switchScreen("s-setup");   // bad input -> generate() alerted
+}
+
+function stgSetRoom(len, wid){
+  $("f-len-ft").value = len;
+  $("f-wid-ft").value = wid;
   // keep the parsed echoes honest — they are wired to the input event
   ["f-len-ft","f-wid-ft"].forEach(function(id){
     $(id).dispatchEvent(new Event("input", {bubbles:true}));
   });
-  if(!FL.showSample()) switchScreen("s-setup");   // bad input -> generate() alerted
 }
+
+// The label on the banner's exit button depends on where you came in from.
+window.stgSampleExitLabel = function(){
+  return SAMPLE_ENTRY === "welcome" ? "Done" : "Now do your room \u2192";
+};
 
 // The one way out of the demo, called from the banner inside FL.
 window.stgExitSample = function(){
   FL.exitSample();
-  // "Now do your room" means YOUR numbers. An empty field is an unambiguous
-  // invitation; leaving 13'x11' risks generating a layout for a room that
-  // isn't yours and not noticing. Plank/gap/stagger stay — those are sensible
-  // starting values, not the demo's.
-  $("f-len-ft").value = "";
-  $("f-wid-ft").value = "";
-  ["f-len-ft","f-wid-ft"].forEach(function(id){
-    $(id).dispatchEvent(new Event("input", {bubbles:true}));
-  });
+  if(SAMPLE_ENTRY === "welcome"){
+    // put the fields back exactly as they were and return where they came from
+    stgSetRoom(SAMPLE_PREV_ROOM ? SAMPLE_PREV_ROOM.len : "",
+               SAMPLE_PREV_ROOM ? SAMPLE_PREV_ROOM.wid : "");
+  } else {
+    // "Now do your room" means YOUR numbers. An empty field is an unambiguous
+    // invitation; leaving 13'x11' risks generating a layout for a room that
+    // isn't yours and not noticing. Plank/gap/stagger stay — those are sensible
+    // starting values, not the demo's.
+    stgSetRoom("", "");
+  }
   clear($("layout-body")); clear($("cuts-body")); clear($("print-area"));
   // restore the mode the user actually chose
   if(SAMPLE_PREV_MODE && SAMPLE_PREV_MODE !== MODE) setMode(SAMPLE_PREV_MODE, {quiet:true});
-  SAMPLE_PREV_MODE = null;
-  switchScreen("s-setup");
-  try{ $("f-len-ft").focus(); }catch(e){}
+  SAMPLE_PREV_MODE = null; SAMPLE_PREV_ROOM = null;
+
+  if(SAMPLE_ENTRY === "welcome"){
+    switchScreen("s-welcome");
+  } else {
+    switchScreen("s-setup");
+    try{ $("f-len-ft").focus(); }catch(e){}
+  }
+  SAMPLE_ENTRY = "first";
 };
 
 (function stgWireWelcomeBase(){
-  var s=$("welcome-sample");  if(s) s.addEventListener("click", stgShowSample);
-  var q=$("welcome-quick");   if(q) q.addEventListener("click", function(){ switchScreen("s-setup"); });
+  var s=$("welcome-sample");
+  if(s) s.addEventListener("click", function(){ stgShowSample("first"); });
+  var sl=$("welcome-sample-link");
+  if(sl) sl.addEventListener("click", function(){ stgShowSample("welcome"); });
+  var q=$("welcome-quick");
+  if(q) q.addEventListener("click", function(){ switchScreen("s-setup"); });
 })();
 
 /* ===========================================================================
@@ -2870,7 +2917,8 @@ var FL = (function(){
     msg.textContent = "A real layout from the real engine \u2014 but a demonstration, "
                     + "so ticking rows and Reshuffle are off here.";
     var go=el("button"); go.type="button";
-    go.textContent = "Now do your room \u2192";
+    go.textContent = (window.stgSampleExitLabel ? window.stgSampleExitLabel()
+                                                : "Now do your room \u2192");
     go.addEventListener("click", function(){ if(window.stgExitSample) window.stgExitSample(); });
     b.appendChild(lab); b.appendChild(msg); b.appendChild(go);
     return b;
