@@ -112,6 +112,44 @@ var ENGINES = {
       getVisibleMin: 'function(){ return VISIBLE_MIN; }'
     },
     exports: ['deckDistance', 'minLoopGap', 'permute', 'buildDeck', 'orderDeck']
+  },
+
+  // The wood material. Pure arithmetic that decides what each plank LOOKS like.
+  // Pinned because the failure mode is statistical, not functional: a change that
+  // narrows the value spread or evens out the grain still renders a floor, still
+  // passes every other suite, and just quietly goes back to looking like a
+  // graphic. Only numbers catch that.
+  material: {
+    module: 'material.js',
+    ranges: [
+      ['  var SPECIES = {};',                     '  /* Along-length sheen.'],
+      ['  function plankGrain(seed, row, piece){', '  /* Baseline for a label']
+    ],
+    // WOOD is the live --plank-1..6 array, filled by refreshTokens() from CSS;
+    // TOK is only reached for the empty-palette fallback. Tests supply both.
+    preamble: 'var WOOD = [], TOK = { ink3:"#eeeeee" };',
+    accessors: {
+      setPalette: 'function(a){ WOOD.length = 0; a.forEach(function(c){ WOOD.push(c); }); }',
+      getSpread:  'function(){ return PLANK_SPREAD; }',
+      getWarmth:  'function(){ return PLANK_WARMTH; }'
+    },
+    exports: ['plankTone', 'plankGrain', 'plankHash', 'plankRand',
+              'shadeTone', 'warmTone', 'plankPalette']
+  },
+
+  // Label placement. buildSvg() itself touches the DOM and cannot be sliced, but
+  // the part that decides WHERE a label sits is pure arithmetic, so it is pinned
+  // here rather than left to a screenshot. Guards the clamp that keeps a label
+  // inside the sheet when its row is thinner than the text (edgeRip can be 2"
+  // against a 6.4-unit glyph).
+  label: {
+    module: 'label_geom.js',
+    ranges: [['  var GLYPH_ABOVE = 0.98', '  // One renderer, five skins.']],
+    accessors: {
+      getAbove: 'function(){ return GLYPH_ABOVE; }',
+      getBelow: 'function(){ return GLYPH_BELOW; }'
+    },
+    exports: ['labelBaseline']
   }
 };
 

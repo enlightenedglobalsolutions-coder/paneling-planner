@@ -118,22 +118,62 @@ lock orientation, so "rotate your phone" cannot be a button; the control turns t
 ### Wood is a material renderer, not a pattern
 Plank tone is `plankTone(cand.seed, row, piece)` — a hash of the **layout's identity**, never of
 `isDone`/`isNow`. Those are view state, and feeding them in makes the floor change colour as rows
-are ticked off. `isDone` may only touch `fill-opacity` (which now fades in *every* view — done rows
+are ticked off. `isDone` may only touch opacity (which now fades in *every* view — done rows
 used to keep a full-opacity stroke and so read *brighter* than unfinished ones).
 
-The old `fill = WOOD[(i*5+p*3) % 6]` was a checkerboard: `p*3 % 6` cycles `0,3,0,3`, so **every row
-used exactly two of the six tones, strictly alternating**. That is why it read as a pattern.
+It took three passes to stop looking like a graphic. **All three failures were statistical, not
+functional** — the floor rendered fine every time. `test_material.js` (41) pins each one, because
+nothing else would catch a regression:
 
-Planks carry **no stroke**. Separation comes from a thin bevel — a light catch (`--paper`) along the
-top, a darker shadow (`--ink`) along the bottom, plus an end-joint shadow — all low-opacity and
-theme-derived, so it works in daylight. Grain is 2–3 sparse jittered lines at 0.10α. Background is
-`--ink-2`, the theme ground: **not `--brass`**, which is documented as brass-as-*text* and darkens
-in daylight, so using it as a fill breaks its own contract (that was the gold mat).
+1. **The checkerboard.** `WOOD[(i*5+p*3) % 6]` — `p*3 % 6` cycles `0,3,0,3`, so every row used
+   exactly **two** of the six tones, alternating.
+2. **Six shades of one honey.** A flat pick from `--plank-1..6` spans only ~40 units of luminance.
+   Real bundles cluster mid-tone *with occasional genuinely dark and pale outliers*, so the token
+   supplies the **hue** and a per-plank offset supplies the **value**. The offset is **cubed** —
+   that is the whole trick, since a uniform draw scatters evenly and reads as confetti. Now ~123
+   units, ~115 distinct tones per 120 boards.
+3. **Corduroy, and one hue.** Grain ran the full width of every board with the same gentle S.
+   Now length, position, strength, curvature and count (0–5, one board in five bare) all vary, plus
+   an occasional cathedral arc. And `warmTone` adds a hue axis — **asymmetric on purpose**, because
+   a pale board that also takes a full cool shift washes out to taupe.
+
+**Measuring warmth as R−B on the finished tone does not isolate hue** — `shadeTone` moves R−B by
+itself (darkening scales it down; lightening pulls toward a near-neutral highlight). Reconstruct the
+value-only tone and difference against it, or you will measure value and report the asymmetry
+backwards. That mistake is preserved in the test's comments.
+
+Planks carry **no stroke**. Separation is a bevel — light catch (`--paper`) on top, heavier shadow
+(`--ink`) below plus a softer chamfer pass, and an end-joint shadow. The shadow side is deliberately
+heavier than the catch: a symmetric outline floats like a tile. Strength varies per board, or it
+reads as a drawn rule again.
+
+**One `feTurbulence` overlay** covers the whole floor — flat fills were what still read as laminate.
+`baseFrequency` is **anisotropic** (`0.035 0.75`) so the noise stretches into streaks that follow
+the boards. It is **one filtered rect, not one per plank** — 100+ turbulence passes would be a phone
+problem. It rides inside the rotated group, so the streaks turn with the drawing for free. Known
+limit: the noise is continuous **through end joints**, where real grain would stop.
+
+Background is `--ink-2`, the theme ground: **not `--brass`**, which is documented as brass-as-*text*
+and darkens in daylight, so using it as a fill breaks its own contract (that was the gold mat).
 
 **Palette is an input.** `SPECIES` is a plain JS map, defaulting to the `--plank-1..6` theme tokens.
 Deliberately *not* new CSS custom properties: `refreshTokens` reads a fixed prefix and count, so
 every species would need declarations in both theme blocks — O(species × themes) stylesheet edits
 for what is a material choice, not a theme concern. No picker ships yet; the seam is what ships.
+
+### Labels follow the plank, and stay on the sheet
+In the rotated view every label used to carry a `rotate(-90)` that exactly cancelled the group's
+`rotate(90)`, so labels came out axis-aligned on screen, reading **across** planks that now ran
+vertically. Dropping it fixed **two** symptoms, because cancelling the rotation also put each
+label's long dimension on the room's *narrow* axis — 6 of 55 labels in a 13'×11' kitchen overflowed
+the viewBox by 2.6″–4.2″. Row numbers turn too: when you tilt the phone to read a rotated sheet,
+mixed orientations are worse than either one.
+
+`labelBaseline()` clamps the cross axis, because a first/last row is only `edgeRip` wide and
+`edgeRip` may be as little as `minRip` (2″) against a 6.4-unit glyph. The extents are **measured and
+asymmetric** — ~0.95em above the baseline, ~0.25em below — and a symmetric half-height under-clamps
+the bottom edge, which is how the last row's number kept clipping. Pinned in `test_labels.js` (22),
+which also asserts the counter-rotation has not come back.
 
 ### Reshuffle
 Lives directly under the picture inline, and in the overlay bar beside Rotate/Fit — you must be able
@@ -180,7 +220,7 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 11 suites, 567 assertions.
+if every suite passes, so it is safe in front of a deploy. 13 suites, 633 assertions.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
@@ -213,7 +253,9 @@ var FL = E.load('fl');     // -> require('./fl_engine.js') if it exists
                            // -> else slice index.html between anchors
 ```
 
-Registered engines: `grid`, `fl`, `panel`, `deck`. **Extracting an engine to a module is a no-op for
+Registered engines: `grid`, `fl`, `panel`, `deck`, `material`, `label`. The last two are not
+engines in the layout sense — they are the pure arithmetic behind how the drawing *looks*, sliced
+out because `buildSvg` itself touches the DOM and cannot be. **Extracting an engine to a module is a no-op for
 the tests** — proven: writing `grid_geom.js` flips `test_bridge.js` from the slice path to the module
 path with no harness edit and the same 16/16.
 
