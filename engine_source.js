@@ -145,6 +145,21 @@ var ENGINES = {
               'relLum', 'mixHex', 'textOn']
   },
 
+  // The join: the pure half of "can this area be laid, and with what numbers".
+  // stgShowAreaLayout() itself touches the DOM and the overlay, but the two
+  // decisions that matter — is this one band, and does the dimension survive the
+  // trip through a Setup field — are arithmetic and belong under test.
+  // parseMeas rides along because the round-trip is only meaningful against the
+  // REAL parser; reimplementing it here would test the reimplementation.
+  areajoin: {
+    module: 'area_join.js',
+    ranges: [
+      ['// Lossless inches -> a Setup field.', 'function stgShowAreaLayout(i){'],
+      ['function parseMeas(str, defUnit){',    '// Read a measurement field']
+    ],
+    exports: ['stgInchField', 'stgAreaRect', 'parseMeas', 'fracVal']
+  },
+
   // The demo rooms. Not an engine at all — a config table — but it is sliced the
   // same way for the same reason: the numbers printed on a room card must be the
   // numbers the engine actually produces, and the only way to know is to run one

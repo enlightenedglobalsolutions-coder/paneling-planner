@@ -253,6 +253,56 @@ sample mode): a demonstration is not something you install from. And the demo mu
 `stagger.store.v1` — a seeded job would permanently strand legacy data behind `shouldMigrate()`'s
 bare `jobs.length` check.
 
+## The join — per-area layouts (Stage 3)
+
+Tapping **Layout** on an area row hands off to the Layout screen with a badge naming the area, the
+job, the measured dimensions and **the parameters it used**.
+
+**It is one code path, not two.** `stgShowAreaLayout()` writes the area's dimensions into the *same*
+Setup fields Quick calc reads and calls the *same* `generate()`. There is deliberately **no per-area
+cfg builder** — a second one would be a second thing to keep in agreement, and the plan's hard
+checkpoint ("a per-area layout must byte-match Quick calc for identical dims") would then be pinning
+a coincidence. Verified in-browser: SVG (every rect *and* every label) and all 15 cut-list rows
+byte-identical for 13'×11'; and the three demo rooms reproduce their existing goldens through the
+area path.
+
+**Dispatch is on `bands.length === 1`, never on `kind`.** `kind` is `'rect'` when
+`bands.length <= 1` — **true for zero bands as well as one** — so a shape that produced no bands
+reads as a rectangle while carrying a null `rect`. `stgAreaRect()` checks the band count *and* the
+rect payload; `test_area.js` asserts the source does not dispatch on `kind`.
+
+**The join lives in script block 3.** It has to: `JOB`, `stgSheet` and `fmtSqft` are inside that
+sealed IIFE and are **not** global. A first cut placed it in block 1 and the button silently did
+nothing — no console error, because the handler never ran. Everything it needs *outward* (`FL`,
+`stgSetRoom`, `setMode`, `switchScreen`, `$`, `clear`) **is** global, so the dependency runs one way.
+
+**Dimensions cross as inch-marked strings** (`stgInchField` → `156"`). The Setup field defaults to
+**feet**, so a bare `155.5` would be read as 1866″; and formatting as `12'-11 1/2"` would snap to
+sixteenths and quietly move a room stored to three decimals. The inch mark makes `parseMeas` return
+the number verbatim. The field's live echo still shows the tape-measure reading.
+
+**Nothing is persisted.** `areaMode` joins `sampleMode` under one predicate, **`isReadOnlyLayout()`**
+— ticking off, Reshuffle on, progress key never written. New guards should ask *that* rather than
+name a mode, which is what stops the next mode from having to remember four separate checks. Rows
+also lose their `.fl-tapzone` affordance: a row that looks tappable and does nothing is the
+dishonest failure this app is written against. Pinning lands in Stage 5; `area.pinned` is
+paneling-shaped (`{scenarioFt, boards}`) and `saveCurrentArea` rebuilds from a 16-name allowlist
+that would erase any new field on the next re-measure.
+
+### L-shapes refuse, with the evidence
+Not because it is hard — because **both fakes were measured and both were worse than saying no**:
+
+- **Bounding box:** audits clean (`violations: 0`, a drawing that looks entirely right) and
+  over-counts material by **42.9%**. A wrong answer that looks correct is the worst thing this app
+  could hand someone standing in a supplier's aisle.
+- **Band-by-band adapter:** across 256 generated L geometries it silently violated the adjacent-row
+  seam rule in **5%**, because `buildLayout()` hardcodes row 1's start and never reads
+  `opts.prevRows`. Fixing that is an edit to the pinned engine core — its own stage, its own goldens.
+
+The message ships; no button does. The band count is interpolated from the area's own profile, never
+hardcoded, for the same reason the deck verdict is. `test_area.js` asserts the copy promises no date
+or version, and that no `[Split this area]` button exists anywhere.
+
 ## Beginner mode (EGS pilot — Stagger defines this pattern)
 
 All help copy lives in **one liftable block, `STAGGER_HELP`**, keyed by the `data-help` attribute
@@ -292,7 +342,7 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 15 suites, 786 assertions.
+if every suite passes, so it is safe in front of a deploy. 16 suites, 834 assertions.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
@@ -325,7 +375,7 @@ var FL = E.load('fl');     // -> require('./fl_engine.js') if it exists
                            // -> else slice index.html between anchors
 ```
 
-Registered engines: `grid`, `fl`, `panel`, `deck`, `material`, `label`, `sample`. The last three are
+Registered engines: `grid`, `fl`, `panel`, `deck`, `material`, `label`, `sample`, `areajoin`. The last three are
 not engines in the layout sense — `material` and `label` are the pure arithmetic behind how the
 drawing *looks*, sliced out because `buildSvg` itself touches the DOM and cannot be; `sample` is a
 config table, sliced for the same reason anything else is, so the numbers on a room card can be run

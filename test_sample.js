@@ -158,8 +158,17 @@ console.log("\nCONTAINMENT IS AT THE WRITE, NOT AT THE BUTTON");
   // starts clobbering a real install's ticks again — and nothing on screen says so.
   var i = html.indexOf('function saveProgress(){');
   var body = html.slice(i, html.indexOf('function doneCount(', i));
-  ok("saveProgress() returns early in sample mode", /if \(inSample\(\)\) return;/.test(body));
-  ok("...before it reaches setItem", body.indexOf('inSample()') < body.indexOf('setItem'));
+  // Assert the GUARD, not its spelling. Stage 3 widened `inSample()` to
+  // `isReadOnlyLayout()` so the per-area preview is covered by the same rule —
+  // pinning the old identifier would have read that strengthening as a break.
+  ok("saveProgress() returns early for a read-only layout",
+     /if \(isReadOnlyLayout\(\)\) return;/.test(body));
+  ok("...before it reaches setItem",
+     body.indexOf('isReadOnlyLayout()') < body.indexOf('setItem'));
+  // And the predicate must actually cover both modes.
+  var p = html.indexOf('function isReadOnlyLayout(){');
+  ok("...and that predicate covers the demo AND a per-area preview",
+     /return sampleMode \|\| areaMode;/.test(html.slice(p, p+120)));
 
   // Every write to the progress key must go through saveProgress().
   var writes = html.match(/localStorage\.setItem\(PKEY/g) || [];
@@ -167,8 +176,8 @@ console.log("\nCONTAINMENT IS AT THE WRITE, NOT AT THE BUTTON");
 
   // Ticking stays off: a demonstration is not something you install from.
   var t = html.indexOf('function toggleRow(n){');
-  ok("toggleRow still refuses in sample mode",
-     /if \(inSample\(\)\) return;/.test(html.slice(t, t+220)));
+  ok("toggleRow still refuses in a read-only layout",
+     /if \(isReadOnlyLayout\(\)\) return;/.test(html.slice(t, t+320)));
 
   // And the button is no longer hidden — that was the point.
   ok("Reshuffle is no longer gated on !inSample()",

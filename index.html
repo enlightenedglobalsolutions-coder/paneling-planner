@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.27-0759';</script>
+<script>window.EGS_VERSION = '2026.07.27-1335';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -223,6 +223,22 @@
   .samplebar button{width:100%;margin-top:10px;min-height:var(--tap);padding:11px;
     font:inherit;font-size:14.5px;font-weight:700;border-radius:var(--radius-sm);
     border:1px solid var(--on-brass);background:transparent;color:var(--on-brass);cursor:pointer}
+
+  /* ---- Per-area layout badge ----
+     Quieter than the sample bar on purpose: the demo is a pitch and shouts, an
+     area badge is a label on your own work and should not. Bordered rather than
+     filled, so it reads as chrome around the layout instead of an interruption
+     in front of it. */
+  .areabar{background:var(--ink-2);color:var(--paper);border:1px solid var(--brass);
+    border-radius:var(--radius);padding:12px 14px;margin-bottom:12px}
+  .areabar .lab{font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;
+    color:var(--brass)}
+  .areabar .msg{font-size:12.5px;line-height:1.55;margin-top:4px;color:var(--paper-dim)}
+  .areabar button{width:100%;margin-top:10px;min-height:var(--tap);padding:11px;
+    font:inherit;font-size:14.5px;font-weight:700;border-radius:var(--radius-sm);
+    border:1px solid var(--brass);background:transparent;color:var(--brass);cursor:pointer}
+  .areabar button:active{background:var(--brass-fill);color:var(--on-brass);
+    border-color:var(--brass-fill)}
 
   /* ---- Settings controls ---- */
   .segrow{display:flex;gap:6px}
@@ -2520,6 +2536,28 @@ var FL = (function(){
   var sampleMode = false;
   function inSample(){ return sampleMode; }
 
+  /* Area mode: the layout for ONE area of a real job.
+
+     Behaviourally it is the same contract as the demo — ticking off, Reshuffle
+     on, progress key never written — for the same reason: egs-floor-progress is
+     a single GLOBAL slot with no per-area concept, so writing from here would
+     overwrite whatever the user is actually installing. Pinning a per-area
+     layout is Stage 5's job, and it needs a place to live that is not this key.
+
+     It is a SEPARATE flag from sampleMode rather than a reuse, because the two
+     say different things on screen and leave to different places: a demo exits
+     to Setup or the welcome, an area exits back to its job. Sharing one flag
+     would make the banner lie about one of them. */
+  var areaMode = false;
+  var AREA = null;         // { name, jobName, runIn, acrossIn } while areaMode
+  function inArea(){ return areaMode; }
+
+  /* The one predicate every containment guard uses. Both modes are "a layout
+     you are looking at, not one you are laying", and every new guard should ask
+     THIS rather than naming a mode — that is what stops the next mode from
+     having to remember to add itself to four separate checks. */
+  function isReadOnlyLayout(){ return sampleMode || areaMode; }
+
   function readInputs(){
     var gap = measIn("f-gap");
     var runIn = measIn("f-len-ft") - 2*gap;
@@ -2705,6 +2743,30 @@ var FL = (function(){
   }
   function exitSample(){ sampleMode = false; }
 
+  /* One area's layout.
+
+     Note what this does NOT do: it does not build a cfg of its own. The caller
+     writes the area's dimensions into the SAME Setup fields Quick calc reads,
+     and this runs the SAME generate(). That is deliberate and it is the whole
+     answer to "does a per-area layout match Quick calc for identical dims" —
+     they are not two implementations kept in agreement, they are one code path
+     entered from two places. A second cfg builder here would be a second thing
+     to keep in sync, and `test_area.js` would be pinning a coincidence. */
+  function showArea(meta){
+    areaMode = true;
+    AREA = meta || null;
+    generate();
+    if(!S.cands.length){        // generate() alerts and bails on bad input
+      areaMode = false; AREA = null;
+      return false;
+    }
+    S.done = {};                // an area preview never inherits install ticks
+    renderLayout();
+    renderCuts();
+    return true;
+  }
+  function exitArea(){ areaMode = false; AREA = null; }
+
   function reshuffle(){
     if (!S.cands.length) return;
     if ((S.deckSize || 0) <= 1) return;   // nothing visibly different to shuffle to
@@ -2757,7 +2819,7 @@ var FL = (function(){
      rows exactly as they left them. Every write to that key goes through this
      function; keep it that way. */
   function saveProgress(){
-    if (inSample()) return;
+    if (isReadOnlyLayout()) return;
     try{
       var done=[]; for (var k in S.done){ if (S.done[k]) done.push(Number(k)); }
       window.localStorage.setItem(PKEY, JSON.stringify({ fp:S.fp, done:done }));
@@ -2771,7 +2833,9 @@ var FL = (function(){
   function hasProgress(){ return doneCount() > 0; }
 
   function toggleRow(n){
-    if (inSample()) return;     // a sample room is not something you install from
+    // Neither a demo nor a per-area preview is something you install FROM: the
+    // progress key has one global slot and no idea which area you mean.
+    if (isReadOnlyLayout()) return;
     if (S.done[n]) delete S.done[n]; else S.done[n] = true;
     saveProgress();
     refreshWake();
@@ -3609,6 +3673,45 @@ var FL = (function(){
     return wrap;
   }
 
+  /* The area badge. Names the area, and NAMES THE PARAMETERS it was built from.
+
+     That second half is the point. `stgReadSetup`'s sin was reading hidden
+     inputs from the wrong mode and passing invented constants off as the user's
+     numbers. Reading the flooring fields in flooring mode is a different thing —
+     but only if the screen says which numbers it used, so a wrong one is
+     visible rather than buried. The stated limitation is part of the badge, not
+     a footnote: one plank size applies to every area until Stage 4 moves these
+     into the job. */
+  function areaBanner(cfg){
+    var b=el("div","areabar");
+    var lab=el("div","lab");
+    lab.textContent = (AREA && AREA.name ? AREA.name : "This area")
+                    + (AREA && AREA.jobName ? " · " + AREA.jobName : "");
+    b.appendChild(lab);
+
+    var dims=el("div","msg");
+    dims.textContent = "Measured " + inch(cfg.runIn + 2*cfg.gap) + " × "
+                     + inch(cfg.acrossIn + 2*cfg.gap) + ", laid the long way.";
+    b.appendChild(dims);
+
+    // Sub-inch values read as fractions on a job site, not as decimals: a 1/4"
+    // gap is "a quarter", never "nought point two five". fmtEcho already speaks
+    // tape-measure; it just leads with a "0 " for values under an inch.
+    function meas(v){ return v < 1 ? fmtEcho(v).replace(/^0\s+/, "") : inch(v); }
+    var par=el("div","msg");
+    par.textContent = "From Setup: " + meas(cfg.plankLen) + " × " + meas(cfg.plankWid)
+                    + " plank · " + meas(cfg.minOff) + " minimum stagger · "
+                    + meas(cfg.gap) + " expansion gap · " + cfg.perBox + " per box. "
+                    + "One plank size applies to every area for now.";
+    b.appendChild(par);
+
+    var go=el("button"); go.type="button";
+    go.textContent = "← Back to the job";
+    go.addEventListener("click", function(){ if(window.stgExitArea) window.stgExitArea(); });
+    b.appendChild(go);
+    return b;
+  }
+
   function renderLayout(){
     var body=$("layout-body"); clear(body);
     if (!S.cands.length){
@@ -3617,6 +3720,7 @@ var FL = (function(){
     }
     var cand=S.cands[S.active], cfg=S.cfg;
     if (inSample()) body.appendChild(sampleBanner(cfg));
+    else if (inArea()) body.appendChild(areaBanner(cfg));
 
     var card=el("div","card");
     var lbl=el("p","lbl"); var deckN = Math.max(1, Math.min(S.deckSize || 1, S.cands.length));
@@ -3774,6 +3878,7 @@ var FL = (function(){
     }
     var cand=S.cands[S.active], cfg=S.cfg;
     if (inSample()) body.appendChild(sampleBanner(cfg));
+    else if (inArea()) body.appendChild(areaBanner(cfg));
     var cur = currentRow();
 
     var head=el("div","card");
@@ -3838,14 +3943,15 @@ var FL = (function(){
 
   function cutRow(r, cfg, cur){
     var isDone = !!S.done[r.n], isNow = (r.n === cur);
-    // In sample mode the row is not a tap target at all. toggleRow() is guarded
-    // too, but a row that LOOKS tappable and silently does nothing is exactly
-    // the kind of dishonest failure this app is written against.
-    var cls = "fl-row" + (inSample() ? "" : " fl-tapzone")
+    // In a read-only layout — the demo OR a per-area preview — the row is not a
+    // tap target at all. toggleRow() is guarded too, but a row that LOOKS
+    // tappable and silently does nothing is exactly the kind of dishonest
+    // failure this app is written against.
+    var cls = "fl-row" + (isReadOnlyLayout() ? "" : " fl-tapzone")
             + (isDone ? " done" : "") + (isNow ? " now" : "");
     var row=el("div", cls);
     row.id = "fl-r-" + r.n;
-    if (!inSample()) row.addEventListener("click", function(){ toggleRow(r.n); });
+    if (!isReadOnlyLayout()) row.addEventListener("click", function(){ toggleRow(r.n); });
 
     var n=el("div", isDone ? "fl-rn tick" : "fl-rn");
     n.textContent = isDone ? "\u2713" : String(r.n);
@@ -3977,6 +4083,9 @@ var FL = (function(){
     showSample: showSample,
     exitSample: exitSample,
     inSample: inSample,
+    showArea: showArea,
+    exitArea: exitArea,
+    inArea: inArea,
     renderLayout: renderLayout,
     renderCuts: renderCuts,
     buildPrintArea: buildPrintArea,
@@ -6058,9 +6167,14 @@ function renderJob(){
     var chip = '<button type="button" class="matchip'+(a.excluded?' excl':'')
              + '" data-mat="'+i+'" aria-label="Change material">'
              + esc(a.excluded ? 'Excluded' : matLabel(a.materialType))+'</button>';
+    // THE JOIN. Shown for every area, including the ones that will refuse \u2014 a
+    // control that vanishes for some rows teaches nothing, whereas one that
+    // explains itself teaches the shape rule once.
+    var lay = '<button type="button" class="ghost lay" data-lay="'+i+'">Layout</button>';
     return '<div class="arearow" data-i="'+i+'">'
       + '<div class="info"><div class="an">'+esc(a.name)+'</div>'
       + '<div class="am">'+chip+' \u00b7 '+fmtSqft(a.sqft)+' sq ft \u00b7 '+kind+'</div></div>'
+      + lay
       + '<button class="ghost rn" data-rename="'+i+'" aria-label="Rename">\u270e</button>'
       + '<button class="ghost del" data-del="'+i+'">Delete</button></div>';
   }).join('');
@@ -6086,6 +6200,11 @@ function renderJob(){
   host.querySelectorAll('[data-mat]').forEach(function(b){
     b.addEventListener('click', function(e){ e.stopPropagation();
       stgOpenMaterialSheet(+b.getAttribute('data-mat'));
+    });
+  });
+  host.querySelectorAll('[data-lay]').forEach(function(b){
+    b.addEventListener('click', function(e){ e.stopPropagation();
+      stgShowAreaLayout(+b.getAttribute('data-lay'));
     });
   });
   host.querySelectorAll('[data-del]').forEach(function(b){
@@ -6751,6 +6870,116 @@ function stgSetMaterial(i, mat){
   persist();
   renderJob();
 }
+
+/* ===========================================================================
+   THE JOIN — one area's geometry meets the engine.
+
+   This is the step the user's story broke at. Everything here is deliberately
+   thin: the area supplies two numbers, they go into the SAME Setup fields Quick
+   calc reads, and the SAME generate() runs. There is no per-area cfg builder,
+   because a second one would be a second thing to keep in agreement, and the
+   "does it match Quick calc" test would then be pinning a coincidence instead of
+   a shared code path.
+
+   RECTANGLES ONLY, and the dispatch is on `bands.length === 1` — NOT on `kind`.
+   `kind` is 'rect' when bands.length <= 1, i.e. for ZERO bands as well as one,
+   so a shape that produced no bands at all reads as a rectangle and hands the
+   engine a null `rect`. `engineInput.rect` is itself only populated at exactly
+   one band, which is the same test said twice; asserting both keeps the two from
+   drifting apart.
+
+   L-shapes refuse. See stgAreaRefusal() for why that is the honest answer and
+   not laziness.
+   --------------------------------------------------------------------------- */
+var AREA_PREV_MODE = null;
+var AREA_PREV_ROOM = null;
+
+// Lossless inches -> a Setup field. The inch mark makes parseMeas return the
+// number verbatim regardless of the field's ft default, so a measured 155.5"
+// round-trips exactly. Formatting it as 12'-11 1/2" would round to sixteenths
+// and quietly change the room before the engine ever saw it.
+function stgInchField(v){ return String(v) + '"'; }
+
+// One band => a rectangle the engine can lay. Anything else is honest refusal.
+function stgAreaRect(area){
+  var e = area && area.engineInput;
+  if (!e || !e.ok) return null;
+  var bands = (e.profile && e.profile.bands) ? e.profile.bands : [];
+  if (bands.length !== 1) return null;
+  if (!e.rect || !(e.rect.runIn > 0) || !(e.rect.acrossIn > 0)) return null;
+  return e.rect;
+}
+
+function stgShowAreaLayout(i){
+  var area = JOB && JOB.areas ? JOB.areas[i] : null;
+  if (!area) return;
+  var rect = stgAreaRect(area);
+  if (!rect){ stgAreaRefusal(area); return; }
+
+  AREA_PREV_ROOM = { len:$("f-len-ft").value, wid:$("f-wid-ft").value };
+  AREA_PREV_MODE = MODE;
+  setMode("floor", {quiet:true});          // switchScreen dispatches on MODE
+  stgSetRoom(stgInchField(rect.runIn), stgInchField(rect.acrossIn));
+
+  stgCloseJobs();                          // #jobsOverlay is z-index 9000; the
+                                           // fullscreen layout overlay is 80, so
+                                           // Expand would land UNDERNEATH it.
+  if(!FL.showArea({ name:area.name, jobName:(JOB && JOB.name) || "",
+                    runIn:rect.runIn, acrossIn:rect.acrossIn })){
+    switchScreen("s-setup");               // bad dims -> generate() already alerted
+  }
+}
+
+/* The refusal.
+
+   An L-shape is not refused because it is hard. It is refused because both ways
+   of faking it were MEASURED and both were worse than saying no:
+
+     - Lay the bounding box. Audits clean — `violations: 0`, a drawing that looks
+       entirely right — and over-counts material by 42.9%. A wrong answer that
+       looks correct is the worst thing this app could hand a person standing in
+       a supplier's aisle.
+     - Adapt band-by-band. Across 256 generated L geometries it silently violated
+       the adjacent-row seam rule in 5% of them, because buildLayout() hardcodes
+       row 1's start and never reads opts.prevRows. Fixing that is an edit to the
+       pinned engine core, which is its own stage with its own goldens.
+
+   So the message ships and no button does. Copy is in the one-card marker's
+   register: short, says why, promises nothing. The band count is interpolated
+   from the area's own profile — never hardcoded — for the same reason the deck
+   verdict is. */
+function stgAreaRefusal(area){
+  var e = area && area.engineInput;
+  var bands = (e && e.profile && e.profile.bands) ? e.profile.bands.length : 0;
+  var shape = bands > 1 ? (bands + " bands")
+            : (e && e.ok) ? "no clean bands"
+            : "a shape it could not read";
+  stgSheet({
+    title: "This area steps — Stagger lays rectangles for now",
+    subject: { name: area.name,
+               detail: fmtSqft(area.sqft || 0) + " sq ft · " + shape },
+    body: "Stagger read this area as " + shape + ". It could lay the bounding box "
+        + "instead and the drawing would look right, but the board count came out "
+        + "over 40% high in testing — you would buy a third of a room you do not "
+        + "have. A workaround was tried too: across 256 L-shapes it broke the "
+        + "joint-spacing rule on one in twenty without saying so. Doing it "
+        + "properly means teaching the engine to carry joints across a step, and "
+        + "that is its own piece of work. Your measurements and square footage "
+        + "are safe — this is the layout only.",
+    cancelLabel: "Got it"
+  });
+}
+
+// The one way back, called from the badge inside FL.
+window.stgExitArea = function(){
+  FL.exitArea();
+  stgSetRoom(AREA_PREV_ROOM ? AREA_PREV_ROOM.len : "",
+             AREA_PREV_ROOM ? AREA_PREV_ROOM.wid : "");
+  clear($("layout-body")); clear($("cuts-body")); clear($("print-area"));
+  if(AREA_PREV_MODE && AREA_PREV_MODE !== MODE) setMode(AREA_PREV_MODE, {quiet:true});
+  AREA_PREV_MODE = null; AREA_PREV_ROOM = null;
+  stgOpenJobs();
+};
 
 function stgCloseJobs(){ var ov=document.getElementById('jobsOverlay'); if(ov) ov.hidden=true; }
 
