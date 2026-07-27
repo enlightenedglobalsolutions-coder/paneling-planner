@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.27-0734';</script>
+<script>window.EGS_VERSION = '2026.07.27-0759';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -198,10 +198,24 @@
   .continue-card .nm{font-size:17px;font-weight:700;color:var(--paper);word-break:break-word}
   .continue-card .meta{font-size:12.5px;color:var(--paper-dim);margin-top:3px}
 
+  /* ---- Sample-room cards ----
+     The demo IS the pitch, so on first open these are the primary content, not
+     one button among two. Rendered from SAMPLE_ROOMS so the numbers on the card
+     and the numbers in test_fl_engine.js come from one place. */
+  .roomcards{display:flex;flex-direction:column;gap:9px;margin:0 0 14px}
+  .roomcard{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;
+    min-height:var(--tap);padding:13px 14px;font:inherit;cursor:pointer;
+    background:var(--ink-2);border:1px solid var(--line);border-radius:var(--radius)}
+  .roomcard:active{border-color:var(--brass-fill);background:var(--ink-3)}
+  .roomcard .rc-nm{font-size:16px;font-weight:700;color:var(--paper)}
+  .roomcard .rc-dim{font-size:13px;color:var(--paper-dim);white-space:nowrap}
+  .roomcard .rc-meta{margin-left:auto;font-size:12px;color:var(--paper-faint);white-space:nowrap}
+
   /* ---- Sample-room banner ----
-     The demo is read-only: ticking rows and Reshuffle are suppressed, because
-     egs-floor-progress is a single global slot and Reshuffle writes it
-     unconditionally — it would silently erase a real install's row ticks. */
+     The demo runs the REAL generator — Reshuffle works. Containment is at the
+     write: saveProgress() returns early in sample mode, so egs-floor-progress
+     (a single GLOBAL slot) cannot be touched from the demo. Row ticking stays
+     off because a demonstration is not something you install from. */
   .samplebar{background:var(--brass-fill);color:var(--on-brass);border-radius:var(--radius);
     padding:12px 14px;margin-bottom:12px}
   .samplebar .lab{font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:700}
@@ -283,6 +297,30 @@
     font-family:inherit;font-size:14px;font-weight:700;border-radius:var(--radius-sm);
     border:1px solid var(--brass);background:transparent;color:var(--brass);cursor:pointer}
   .fl-reshuffle:active{background:var(--brass-fill);color:var(--on-brass);border-color:var(--brass-fill)}
+
+  /* ---- One-card marker ----
+     Occupies the Shuffle button's exact slot, at the same visual weight, when
+     the deck collapses to a single layout. It answers the question the missing
+     button would otherwise raise — "why can't I shuffle this?" — instead of
+     leaving a hole.
+
+     Its dot is NOT .helpdot on purpose. .helpdot is hidden wholesale by
+     :root[data-guide="expert"], and this marker must show for everyone: it
+     explains an absence, which an expert needs as much as a beginner. It is
+     styled to match so the two read as one family, and it carries data-marker
+     so a later visibility rule has something to select on without a rewrite. */
+  .fl-onecard{display:flex;align-items:center;gap:7px;width:100%;margin-top:9px;
+    min-height:var(--tap);padding:0 12px;box-sizing:border-box;
+    border:1px dashed var(--line);border-radius:var(--radius-sm);background:transparent}
+  .fl-onecard .oc-txt{font-size:13px;line-height:1.45;color:var(--paper-dim)}
+  .whydot{flex:0 0 17px;width:17px;height:17px;border-radius:50%;border:1px solid var(--brass);
+    background:transparent;color:var(--brass);font-size:11px;font-weight:800;font-style:italic;
+    font-family:var(--serif);display:inline-flex;align-items:center;justify-content:center;
+    cursor:pointer;padding:0;line-height:1;margin-left:auto}
+  .whydot:active{background:var(--brass-fill);color:var(--on-brass)}
+  .fl-whybox{background:var(--ink-3);border:1px solid var(--brass);border-radius:10px;
+    padding:11px 13px;font-size:12.5px;line-height:1.6;color:var(--paper-dim);margin:8px 0 0}
+  .fl-whybox[hidden]{display:none}
   .fl-hint{font-size:10px;color:var(--paper-faint);text-align:center;padding:5px 0 0}
   .fl-stats{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
   .fl-stat{flex:1 1 44%;background:var(--ink-3);border:.5px solid var(--line);
@@ -657,9 +695,19 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
     <div id="welcome-first" hidden>
       <p class="welcome-h">See your new floor before you buy a board</p>
       <p class="welcome-sub">Stagger works out where every plank and every joint goes, so the
-        pattern never repeats and you buy the right number of boxes.</p>
+        pattern never repeats and you buy the right number of boxes. Pick a room and look:</p>
+    </div>
+
+    <!-- The picker. ONE block serving BOTH entry points: it is the primary
+         content on first open, and the returning "Sample room" link toggles this
+         same list rather than duplicating the markup. Cards are rendered from
+         SAMPLE_ROOMS so their numbers cannot drift from the goldens.
+         It sits between the pitch and the "start my room" action, so the demo
+         reads as the offer and measuring reads as the alternative. -->
+    <div class="roomcards" id="welcome-rooms" hidden></div>
+
+    <div id="welcome-first-acts" hidden>
       <div class="welcome-acts">
-        <button class="btn" id="welcome-sample">Show me a sample room</button>
         <button class="btn ghost" id="welcome-start">Start my room — I'm ready to measure</button>
       </div>
     </div>
@@ -1922,22 +1970,50 @@ function stgHasJobs(){
 }
 (function bootScreen(){
   var returning = stgHasJobs();
-  var r=$("welcome-returning"), f=$("welcome-first");
+  var r=$("welcome-returning"), f=$("welcome-first"), fa=$("welcome-first-acts");
   if(r) r.hidden = !returning;
   if(f) f.hidden = returning;
-  // first-open users already have the sample as a primary button
+  if(fa) fa.hidden = returning;
+  // First open: the room cards ARE the offer, shown outright. Returning: they
+  // stay behind the small "Sample room" link, which toggles this same list.
+  var rooms=$("welcome-rooms"); if(rooms) rooms.hidden = returning;
   var sw=$("welcome-sample-wrap"); if(sw) sw.hidden = !returning;
   switchScreen("s-welcome");
 })();
 
 /* ---------------------------------------------------------------------------
-   The sample room.
+   The sample rooms.
 
-   13'-0" x 11'-0", plank 60x9 — the same fixture test_fl_engine.js pins, so the
-   demo and the test share one source of truth and cannot drift apart. Eight of
-   the ten inputs are already the HTML defaults; only the room changes.
+   Three shapes, chosen so the demo shows the thing that varies: a squarish
+   kitchen, a big open floor, and a corridor at 6:1 that is the proof case for
+   fit-to-screen. All three run plank 60x9 — the app's own defaults — so only
+   the room changes and eight of the ten inputs are already the HTML values.
+
+   `rows` / `planks` / `boxes` are printed on the cards and are the SAME numbers
+   test_fl_engine.js pins as goldens for these rooms. They were added as fixtures
+   BEFORE they appeared here, so the card and the test share one source of truth;
+   test_sample.js asserts they still agree, so a card cannot quietly start
+   advertising a figure the engine does not produce.
+
+   `deck` is how many visibly-different layouts the room supports. The hallway
+   is 1 — not a bug: it has 16 distinct candidates, two of them 22" apart, but
+   every layout that differs visibly also wastes 1.7x the best, so the waste
+   ceiling refuses them (pinned in test_deck.js). Its card says so rather than
+   offering a Shuffle that would do nothing.
    --------------------------------------------------------------------------- */
-var SAMPLE = { len:"13'-0", wid:"11'-0" };
+var SAMPLE_ROOMS = [
+  { key:"kitchen",   name:"Kitchen",    len:"13'-0", wid:"11'-0",
+    rows:15, planks:50,  boxes:7,  deck:5 },
+  { key:"greatroom", name:"Great room", len:"20'-0", wid:"16'-0",
+    rows:22, planks:104, boxes:13, deck:5 },
+  { key:"hallway",   name:"Hallway",    len:"24'-0", wid:"4'-0",
+    rows:6,  planks:34,  boxes:5,  deck:1 }
+];
+function stgSampleRoom(key){
+  for (var i=0;i<SAMPLE_ROOMS.length;i++) if (SAMPLE_ROOMS[i].key===key) return SAMPLE_ROOMS[i];
+  return SAMPLE_ROOMS[0];
+}
+var SAMPLE_ROOM = SAMPLE_ROOMS[0];   // the one currently on screen
 
 var SAMPLE_PREV_MODE = null;
 var SAMPLE_PREV_ROOM = null;   // the two fields the demo overwrites
@@ -1957,8 +2033,9 @@ var SAMPLE_ENTRY = "first";    // "first" = the sample offer | "welcome" = the r
    insurance, not a live fix. It stops being theoretical the moment those fields
    are remembered (Stage 4 moves these parameters into the job flow), and it
    costs two lines. */
-function stgShowSample(entry){
+function stgShowSample(entry, roomKey){
   SAMPLE_ENTRY = (entry === "welcome") ? "welcome" : "first";
+  SAMPLE_ROOM = stgSampleRoom(roomKey);
   SAMPLE_PREV_ROOM = { len:$("f-len-ft").value, wid:$("f-wid-ft").value };
   // switchScreen dispatches on MODE. A user with Paneling enabled would get the
   // PANEL renderer painting an empty diagram, so force flooring for the demo.
@@ -1966,9 +2043,14 @@ function stgShowSample(entry){
   // on the way out — a demo must not quietly rewrite a saved preference.
   SAMPLE_PREV_MODE = MODE;
   setMode("floor", {quiet:true});
-  stgSetRoom(SAMPLE.len, SAMPLE.wid);
+  stgSetRoom(SAMPLE_ROOM.len, SAMPLE_ROOM.wid);
   if(!FL.showSample()) switchScreen("s-setup");   // bad input -> generate() alerted
 }
+
+// The banner names the room you actually picked. Read from FL's closure.
+window.stgSampleRoomLabel = function(){
+  return SAMPLE_ROOM.name + ", " + SAMPLE_ROOM.len + "\" × " + SAMPLE_ROOM.wid + "\"";
+};
 
 function stgSetRoom(len, wid){
   $("f-len-ft").value = len;
@@ -2013,10 +2095,37 @@ window.stgExitSample = function(){
 };
 
 (function stgWireWelcomeBase(){
-  var s=$("welcome-sample");
-  if(s) s.addEventListener("click", function(){ stgShowSample("first"); });
+  /* Cards are BUILT from SAMPLE_ROOMS, not written in the HTML, so the figures
+     on screen and the figures in the goldens cannot be typed twice and drift.
+     textContent throughout — no innerHTML. */
+  var wrap=$("welcome-rooms");
+  if(wrap){
+    SAMPLE_ROOMS.forEach(function(r){
+      var c=document.createElement("button");
+      c.type="button"; c.className="roomcard"; c.setAttribute("data-room", r.key);
+      var nm=document.createElement("span"); nm.className="rc-nm"; nm.textContent=r.name;
+      var dm=document.createElement("span"); dm.className="rc-dim";
+      dm.textContent = r.len + "\" × " + r.wid + "\"";
+      var mt=document.createElement("span"); mt.className="rc-meta";
+      mt.textContent = r.rows + " rows · " + r.boxes + " boxes";
+      c.appendChild(nm); c.appendChild(dm); c.appendChild(mt);
+      c.addEventListener("click", function(){
+        // Entry mode still decides the EXIT behaviour: from the first-open offer
+        // leaving clears the room fields as an invitation; from the returning
+        // link it restores whatever was there. The picker does not change that.
+        stgShowSample(wrap.getAttribute("data-entry") || "first", r.key);
+      });
+      wrap.appendChild(c);
+    });
+  }
   var sl=$("welcome-sample-link");
-  if(sl) sl.addEventListener("click", function(){ stgShowSample("welcome"); });
+  if(sl) sl.addEventListener("click", function(){
+    // Same picker, revealed rather than duplicated.
+    if(!wrap) return;
+    wrap.setAttribute("data-entry","welcome");
+    wrap.hidden = !wrap.hidden;
+    if(!wrap.hidden) wrap.scrollIntoView({block:"nearest"});
+  });
   var q=$("welcome-quick");
   if(q) q.addEventListener("click", function(){ switchScreen("s-setup"); });
 })();
@@ -2397,7 +2506,7 @@ var FL = (function(){
 
   // ---------- state ----------
   var S = { cfg:null, cands:[], active:0, box:null,
-            view:"blueprint", done:{}, fp:null, jumpTo:null, deckSize:0 };
+            view:"blueprint", done:{}, fp:null, jumpTo:null, deckSize:0, deckWhy:null };
 
   /* Sample-room mode. The demo shows a REAL layout from the real engine, but it
      is a demonstration, not a job you are laying — so row ticking and Reshuffle
@@ -2523,7 +2632,24 @@ var FL = (function(){
     return [best].concat(bestOrder);
   }
 
+  /* Why a deck collapsed to one card, in the deck's OWN numbers.
+     A one-card room is a verdict, not a failed search, and the user is entitled
+     to the evidence: how many candidates were considered, and how far the
+     nearest affordable one actually was. Both are computed here rather than
+     written into any copy, so the sentence on screen cannot drift from what the
+     deck did. `widest` is the most permissive waste ceiling — if nothing even
+     there is far enough away, nothing was skipped. */
+  function deckVerdict(cands){
+    var widest = DECK_CEILINGS[DECK_CEILINGS.length-1];
+    var best = cands[0];
+    var pool = cands.slice(1).filter(function(c){ return c.waste <= best.waste * widest; });
+    var far = 0;
+    pool.forEach(function(c){ far = Math.max(far, deckDistance(best, c)); });
+    return { considered: cands.length, nearestGap: far, ceiling: widest };
+  }
+
   function orderDeck(cands){
+    S.deckWhy = null;
     if (!cands || cands.length < 2){ S.deckSize = cands ? cands.length : 0; return cands || []; }
     var winner = null;
     DECK_CEILINGS.forEach(function(ceil){
@@ -2538,6 +2664,7 @@ var FL = (function(){
       }
     });
     S.deckSize = winner.deck.length;
+    if (S.deckSize === 1) S.deckWhy = deckVerdict(cands);
     // Everything else stays in the array (export, tests, future use) but Reshuffle
     // only ever cycles S.deckSize cards.
     var spare = cands.filter(function(c){ return winner.deck.indexOf(c) < 0; });
@@ -2581,10 +2708,9 @@ var FL = (function(){
   function reshuffle(){
     if (!S.cands.length) return;
     if ((S.deckSize || 0) <= 1) return;   // nothing visibly different to shuffle to
-    // Belt and braces: the button is not rendered in sample mode, but this is
-    // the call that would clobber a real install's saved ticks, so guard it here
-    // too rather than relying on the UI alone.
-    if (inSample()) return;
+    // Reshuffle now WORKS in the demo. It is safe because saveProgress() is
+    // scoped to real installs, not because this button is hidden — containment
+    // lives at the write, so the demo can show the generator actually generating.
     // A different layout means the row numbers mean something different. Say so
     // before the ticks are thrown away, rather than after.
     if (hasProgress()){
@@ -2621,7 +2747,17 @@ var FL = (function(){
       return d;
     } catch(e){ return {}; }
   }
+  /* THE containment point for sample mode. Scoping the WRITE, rather than
+     removing the buttons that reach it, is what lets the demo run the real
+     generator: Reshuffle can work, because the one thing it must not do — touch
+     a real install's saved ticks — cannot happen from here.
+
+     egs-floor-progress is a single GLOBAL slot, not per-job. A user mid-install
+     who opens the demo out of curiosity and shuffles it must come back to their
+     rows exactly as they left them. Every write to that key goes through this
+     function; keep it that way. */
   function saveProgress(){
+    if (inSample()) return;
     try{
       var done=[]; for (var k in S.done){ if (S.done[k]) done.push(Number(k)); }
       window.localStorage.setItem(PKEY, JSON.stringify({ fp:S.fp, done:done }));
@@ -3275,7 +3411,9 @@ var FL = (function(){
     fit.addEventListener("click", fitOverlay);
     bar.appendChild(fit);
 
-    if (!inSample() && (S.deckSize || 0) > 1){
+    // Shown in the demo too \u2014 see saveProgress(). Still gated on deckSize > 1,
+    // because a one-card room has nothing to shuffle to.
+    if ((S.deckSize || 0) > 1){
       var rs = el("button",""); rs.textContent = "\u21ba Shuffle";
       rs.addEventListener("click", function(){
         reshuffle();
@@ -3411,16 +3549,64 @@ var FL = (function(){
   function sampleBanner(cfg){
     var b=el("div","samplebar");
     var lab=el("div","lab");
-    lab.textContent = "Sample room \u2014 13'-0\" \u00d7 11'-0\"";
+    lab.textContent = "Sample \u2014 " + (window.stgSampleRoomLabel
+                        ? window.stgSampleRoomLabel() : "room");
     var msg=el("div","msg");
-    msg.textContent = "A real layout from the real engine \u2014 but a demonstration, "
-                    + "so ticking rows and Reshuffle are off here.";
+    // Say what is actually true of THIS room. The hallway supports one layout,
+    // so promising a shuffle there would be a lie the user could check in one tap.
+    msg.textContent = ((S.deckSize || 0) > 1
+        ? "A real layout from the real engine \u2014 shuffle it, zoom it, print it. "
+        : "A real layout from the real engine. This room works out to one clean "
+          + "layout, so there is nothing to shuffle to. ")
+      + "Nothing here is saved, and ticking rows off is disabled.";
     var go=el("button"); go.type="button";
     go.textContent = (window.stgSampleExitLabel ? window.stgSampleExitLabel()
                                                 : "Now do your room \u2192");
     go.addEventListener("click", function(){ if(window.stgExitSample) window.stgExitSample(); });
     b.appendChild(lab); b.appendChild(msg); b.appendChild(go);
     return b;
+  }
+
+  /* The one-card marker: what stands where Shuffle would.
+     Condition is GEOMETRIC — deck length 1 — not "is this the hallway". Any room
+     whose candidates all collapse gets this, now or later.
+
+     The long copy interpolates the deck's OWN numbers (S.deckWhy), so the claim
+     on screen is the claim the deck actually made. Hardcoding "16 candidates"
+     would be a sentence that stops being true the moment the ceilings or the
+     visibility floor move, and nothing would catch it. */
+  function oneCardMarker(){
+    var wrap = el("div","");
+    var row = el("div","fl-onecard");
+    row.setAttribute("data-marker","deck.onecard");   // hook for a future visibility rule
+    var t = el("span","oc-txt");
+    t.textContent = "A room this narrow lays one way — nothing worth shuffling.";
+    var dot = el("button","whydot");
+    dot.type = "button";
+    dot.textContent = "i";
+    dot.setAttribute("aria-label","Why is there only one layout?");
+    dot.setAttribute("aria-expanded","false");
+    row.appendChild(t); row.appendChild(dot);
+
+    var box = el("p","fl-whybox");
+    box.hidden = true;
+    var w = S.deckWhy;
+    box.textContent = w
+      ? "Stagger generated " + w.considered + " candidate layouts for this room. "
+        + "In a narrow run there's little width to stagger differently, so every "
+        // Two decimals, not inch(): the point is "this is a hair", and inch()'s
+        // sixteenths render 1.42 as 1.4375″, which reads as false precision.
+        + "candidate landed within " + w.nearestGap.toFixed(2) + "″ of this one — and "
+        + "shifts that small aren't a different floor. One card is what the "
+        + "geometry allows; nothing was skipped."
+      : "This room works out to a single layout.";
+    dot.addEventListener("click", function(){
+      box.hidden = !box.hidden;
+      dot.setAttribute("aria-expanded", box.hidden ? "false" : "true");
+    });
+
+    wrap.appendChild(row); wrap.appendChild(box);
+    return wrap;
   }
 
   function renderLayout(){
@@ -3454,12 +3640,14 @@ var FL = (function(){
     scroll.appendChild(svg);
     card.appendChild(scroll);
 
-    if (!inSample() && (S.deckSize || 0) > 1){
+    if ((S.deckSize || 0) > 1){
       var rs=el("button","fl-reshuffle");
       rs.type="button";
       rs.textContent="\u21ba  Shuffle \u2014 show me another";
       rs.addEventListener("click", reshuffle);
       card.appendChild(rs);
+    } else {
+      card.appendChild(oneCardMarker());
     }
 
     var hint=el("p","fl-hint");

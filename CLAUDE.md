@@ -198,6 +198,61 @@ to see the floor and the button that changes it at once. **Both are guarded on `
 with a one-card deck `reshuffle()` would cycle `% 1` and silently do nothing. When the deck is 1 the
 label reads "One clean layout for this room" instead of "Layout 1 of N".
 
+### The one-card marker
+When the deck collapses to a single layout, the inline Shuffle button is replaced — in its exact
+slot, at the same weight — by a one-liner plus an **(i)**. The condition is **geometric**
+(`deckSize === 1`), never room-specific, so any future one-card room gets it; the `narrow` fixture
+already does, not just the hallway.
+
+The (i) expands copy that quotes **`S.deckWhy`** — `{considered, nearestGap, ceiling}`, written by
+`orderDeck` from `deckVerdict()`. Those numbers are *computed, never written into the string*: the
+sentence claims "every candidate landed within 1.42″ of this one", and that has to stay true when
+the ceilings or `VISIBLE_MIN` move. `test_deck.js` asserts the copy interpolates rather than
+hardcodes. `nearestGap` is measured at the **widest** ceiling, which is what makes "nothing was
+skipped" honest. It prints to 2 decimals, not `inch()` — sixteenths render 1.42 as `1.4375″`, which
+reads as false precision.
+
+**The dot is `.whydot`, deliberately not `.helpdot`.** `:root[data-guide="expert"]` hides every
+`.helpdot`, and this marker must show for everyone — it explains an *absence*, which an expert needs
+more than a beginner, since they are the one who will go looking for the button. It carries
+`data-marker="deck.onecard"` so a later visibility rule has a hook without a rewrite. Styled to match
+`.helpdot` so the two read as one family.
+
+The overlay toolbar gets no marker: a sentence does not belong in a toolbar.
+
+## The demo rooms
+
+Three tappable cards — Kitchen 13'×11', Great room 20'×16', Hallway 24'×4' — rendered from
+**`SAMPLE_ROOMS`**, not written in the HTML. Each card advertises rows/planks/boxes, and those are
+the same numbers `test_fl_engine.js` pins as goldens for those rooms; the fixtures were added
+**before** the cards existed, and `test_sample.js` runs the engine from each card's own dimensions
+and compares. Nothing else connects a card's claim to reality.
+
+All three use the app's **own** Setup defaults (60"×9", gap ¼"). A demo on parameters the app never
+sets proves nothing about what the user is shown — an early draft of `test_deck.js` used a 48" plank
+and measured a 4-card hallway where the app deals 1.
+
+**One markup block serves both entry points.** `#welcome-rooms` is the primary content on first
+open; for returning users it is hidden and the small "Sample room" link toggles that same list. The
+entry mode still decides the **exit**: from the first-open offer, leaving clears the room fields as
+an invitation; from the returning link it restores whatever was there (a returning pro may have real
+numbers in Setup).
+
+### Containment is at the WRITE, not at the button
+Stage 2 disabled Reshuffle in the demo. Stage 2.5b moved the guard into **`saveProgress()`**, which
+returns early in sample mode — so the button came back and the demo runs the real generator.
+
+This matters because `egs-floor-progress` is a **single global slot**, not per-job, and `reshuffle()`
+writes it unconditionally while its "you'll lose your ticks" confirm reads only the *current*
+session's `S.done` — empty in a demo. A user mid-install who opened the demo out of curiosity and
+shuffled would have had their real row ticks erased with no warning.
+
+**Every write to that key must keep going through `saveProgress()`** — `test_sample.js` asserts
+there is exactly one `setItem(PKEY` in the file. Row ticking stays off (`toggleRow` still refuses in
+sample mode): a demonstration is not something you install from. And the demo must never create
+`stagger.store.v1` — a seeded job would permanently strand legacy data behind `shouldMigrate()`'s
+bare `jobs.length` check.
+
 ## Beginner mode (EGS pilot — Stagger defines this pattern)
 
 All help copy lives in **one liftable block, `STAGGER_HELP`**, keyed by the `data-help` attribute
@@ -237,7 +292,7 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 14 suites, 676 assertions.
+if every suite passes, so it is safe in front of a deploy. 15 suites, 786 assertions.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
@@ -270,10 +325,12 @@ var FL = E.load('fl');     // -> require('./fl_engine.js') if it exists
                            // -> else slice index.html between anchors
 ```
 
-Registered engines: `grid`, `fl`, `panel`, `deck`, `material`, `label`. The last two are not
-engines in the layout sense — they are the pure arithmetic behind how the drawing *looks*, sliced
-out because `buildSvg` itself touches the DOM and cannot be. (`textOn`/`relLum`/`mixHex` ride along
-inside `material`'s range and share its hex helpers, so `test_contrast.js` loads `material` too.)
+Registered engines: `grid`, `fl`, `panel`, `deck`, `material`, `label`, `sample`. The last three are
+not engines in the layout sense — `material` and `label` are the pure arithmetic behind how the
+drawing *looks*, sliced out because `buildSvg` itself touches the DOM and cannot be; `sample` is a
+config table, sliced for the same reason anything else is, so the numbers on a room card can be run
+against the engine that has to produce them. (`textOn`/`relLum`/`mixHex` ride along inside
+`material`'s range and share its hex helpers, so `test_contrast.js` loads `material` too.)
 **Extracting an engine to a module is a no-op for
 the tests** — proven: writing `grid_geom.js` flips `test_bridge.js` from the slice path to the module
 path with no harness edit and the same 16/16.

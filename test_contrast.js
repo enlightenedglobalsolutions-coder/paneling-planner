@@ -163,6 +163,34 @@ Object.keys(THEMES).forEach(function(name){
 });
 
 // ===========================================================================
+console.log("\nTHE ONE-CARD MARKER'S GROUNDS");
+// ===========================================================================
+/* The marker that stands where Shuffle would when a room has a single layout.
+   It introduces four new text/ground pairs, and it shows for EVERYONE — it is
+   not a .helpdot and is not hidden in expert mode — so all four are load-bearing
+   in both themes. Card and why-box grounds are read from the stylesheet the same
+   way the rest of this suite reads tokens. */
+Object.keys(THEMES).forEach(function(name){
+  var T = THEMES[name];
+  [['one-liner on the card', T.paperDim, T.ink2],
+   ['(i) glyph on the card', T.brass,    T.ink2],
+   ['why-box copy',          T.paperDim, T.ink3],
+   ['(i) pressed state',     T.onBrass,  T.brassFill]
+  ].forEach(function(c){
+    var r = ratio(c[1], c[2]);
+    ok(name+": "+c[0]+"  "+c[1]+" on "+c[2]+"  "+r.toFixed(2)+":1", r >= AA, r.toFixed(2));
+  });
+});
+// --brass is the one that moves: it must DARKEN in daylight or it cannot sit on
+// a light card. This is the documented two-token rule, asserted rather than trusted.
+ok("--brass darkens in daylight so it can be text on a light ground",
+   M.relLum(THEMES.light.brass) < M.relLum(THEMES.dark.brass),
+   THEMES.light.brass+" vs "+THEMES.dark.brass);
+ok("--brass-fill stays bright in BOTH themes (it is a fill, not text)",
+   THEMES.light.brassFill === THEMES.dark.brassFill,
+   THEMES.light.brassFill+" / "+THEMES.dark.brassFill);
+
+// ===========================================================================
 console.log("\nDONE IS NOT CARRIED BY COLOUR ALONE");
 // ===========================================================================
 (function(){

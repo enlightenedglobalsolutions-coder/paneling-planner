@@ -105,13 +105,15 @@ var ENGINES = {
   deck: {
     module: 'deck.js',
     ranges: [['  var DECK_SLOTS   = 6;', '  function generate(){']],
-    preamble: 'var S = { deckSize: 0 };',
+    preamble: 'var S = { deckSize: 0, deckWhy: null };',
     accessors: {
       getDeckSize: 'function(){ return S.deckSize; }',
+      getDeckWhy:  'function(){ return S.deckWhy; }',
       getSlots:    'function(){ return DECK_SLOTS; }',
-      getVisibleMin: 'function(){ return VISIBLE_MIN; }'
+      getVisibleMin: 'function(){ return VISIBLE_MIN; }',
+      getCeilings: 'function(){ return DECK_CEILINGS; }'
     },
-    exports: ['deckDistance', 'minLoopGap', 'permute', 'buildDeck', 'orderDeck']
+    exports: ['deckDistance', 'minLoopGap', 'permute', 'buildDeck', 'orderDeck', 'deckVerdict']
   },
 
   // The wood material. Pure arithmetic that decides what each plank LOOKS like.
@@ -141,6 +143,17 @@ var ENGINES = {
     exports: ['plankTone', 'plankGrain', 'plankHash', 'plankRand',
               'shadeTone', 'warmTone', 'plankPalette',
               'relLum', 'mixHex', 'textOn']
+  },
+
+  // The demo rooms. Not an engine at all — a config table — but it is sliced the
+  // same way for the same reason: the numbers printed on a room card must be the
+  // numbers the engine actually produces, and the only way to know is to run one
+  // against the other.
+  sample: {
+    module: 'sample_rooms.js',
+    ranges: [['var SAMPLE_ROOMS = [', 'function stgSampleRoom(key){']],
+    accessors: { getRooms: 'function(){ return SAMPLE_ROOMS; }' },
+    exports: []
   },
 
   // Label placement. buildSvg() itself touches the DOM and cannot be sliced, but

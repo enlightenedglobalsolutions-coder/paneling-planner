@@ -74,6 +74,27 @@ var FIXTURES = [
     metrics:{seed:88,guard:true,violations:0,relaxed:0,waste:296.5,unique:15,period:15},
     box:{planks:50,boxes:7,perBox:8}, sha:'f2b63670853b129c', suggest:15, locked:false },
 
+  // The other two demo rooms. Added as goldens BEFORE they appeared in the UI,
+  // so a room card's numbers and its test come from one source rather than being
+  // typed twice. All three use the app's OWN defaults (60"x9", gap 1/4) — a
+  // fixture on parameters the app never sets proves nothing about what the user
+  // is shown.
+  { key:'greatroom', why:"demo room 2 — 20'x16', the big open floor",
+    roomRunIn:240, roomAcrossIn:192, gap:0.25, plankLen:60, plankWid:9,
+    minOff:16, minReuse:20, minRip:2, perBox:8, rotate:4,
+    nRows:22, edgeRip:5.75, cands:16, ties:0,
+    starts:[60,32,16,53.5,35,13.5,56,36,18,59.5,41.5,20,57.5,39.5,16.5,56,37,19.5,57,40,17,59.5],
+    metrics:{seed:250,guard:false,violations:0,relaxed:0,waste:407.5,unique:20,period:22},
+    box:{planks:104,boxes:13,perBox:8}, sha:'87381dd7b2d49096', suggest:15, locked:false },
+
+  { key:'hallway', why:"demo room 3 — 24'x4', 6:1, the fit-to-screen proof case",
+    roomRunIn:288, roomAcrossIn:48, gap:0.25, plankLen:60, plankWid:9,
+    minOff:16, minReuse:20, minRip:2, perBox:8, rotate:4,
+    nRows:6, edgeRip:5.75, cands:16, ties:0,
+    starts:[60,26,44,6.5,24.5,41],
+    metrics:{seed:250,guard:true,violations:0,relaxed:0,waste:102,unique:6,period:6},
+    box:{planks:34,boxes:5,perBox:8}, sha:'f24aeef20b8b0439', suggest:15, locked:false },
+
   { key:'lock', why:"the geometry lock — legal on every rule and still a staircase",
     roomRunIn:240, roomAcrossIn:132, gap:0, plankLen:48, plankWid:9,
     minOff:16, minReuse:20, minRip:2, perBox:8, rotate:4,
@@ -106,6 +127,18 @@ var FIXTURES = [
     metrics:{seed:1234,guard:false,violations:0,relaxed:0,waste:24.5,unique:2,period:2},
     box:{planks:7,boxes:1,perBox:8}, sha:'05b4ddd2427ed19d', suggest:11, locked:false }
 ];
+
+
+// Look fixtures up BY KEY, never by index. This suite used to index the array
+// directly for the kitchen and the lock, so inserting a fixture above them
+// silently repointed nine assertions at a different room — a green suite testing
+// the wrong thing. Adding the demo rooms is exactly the edit that would have
+// done it, which is why the lookup changed in the same commit.
+function fx(key){
+  var f = FIXTURES.filter(function(x){ return x.key === key; })[0];
+  if (!f){ console.log("FAIL  no fixture named '"+key+"'"); process.exit(1); }
+  return f;
+}
 
 // ===========================================================================
 console.log("\nGOLDENS — the layout the user is shown");
@@ -152,20 +185,20 @@ FIXTURES.forEach(function(f){
 // ===========================================================================
 console.log("\nDETERMINISM — the property the goldens rest on");
 // ===========================================================================
-var dcfg = mkCfg(FIXTURES[0]);
+var dcfg = mkCfg(fx('kitchen'));
 ok("same cfg twice in-process -> identical",
    E.digest(FL.generateCandidates(dcfg))===E.digest(FL.generateCandidates(dcfg)));
 
 // deep-freeze: if a future optimisation starts mutating cfg in place, this
 // throws (strict mode) or silently diverges — either way the suite says so.
 (function(){
-  var frozen = mkCfg(FIXTURES[0]);
+  var frozen = mkCfg(fx('kitchen'));
   Object.freeze(frozen.widths); Object.freeze(frozen);
   var out;
   try { out = FL.generateCandidates(frozen); }
   catch(e){ ok("frozen cfg accepted (engine does not mutate its input)", false, e.message); return; }
   ok("frozen cfg accepted (engine does not mutate its input)", true);
-  ok("frozen cfg gives the same result", E.digest(out)===FIXTURES[0].sha, E.digest(out));
+  ok("frozen cfg gives the same result", E.digest(out)===fx('kitchen').sha, E.digest(out));
 })();
 
 // ===========================================================================
@@ -177,7 +210,7 @@ FIXTURES.forEach(function(f){
      FL.audit(best.rows,cfg)===f.metrics.violations, "audit="+FL.audit(best.rows,cfg));
 });
 (function(){
-  var cfg=mkCfg(FIXTURES[0]), rows=FL.generateCandidates(cfg)[0].rows;
+  var cfg=mkCfg(fx('kitchen')), rows=FL.generateCandidates(cfg)[0].rows;
   var adjBad=0, backBad=0;
   for(var i=1;i<rows.length;i++){
     if(FL.clearance(rows[i].start, rows[i-1].joints, cfg.runIn, cfg.plankLen) < cfg.minOff-0.001) adjBad++;
@@ -195,7 +228,7 @@ ok("clearance() treats an empty neighbour as unconstrained",
 console.log("\nCONSTRUCTION RULES — enforced by build, not by audit");
 // ===========================================================================
 (function(){
-  var cfg=mkCfg(FIXTURES[0]), rows=FL.generateCandidates(cfg)[0].rows;
+  var cfg=mkCfg(fx('kitchen')), rows=FL.generateCandidates(cfg)[0].rows;
   ok("row 1 is always a full plank, never relaxed",
      rows[0].start===cfg.plankLen && rows[0].relaxed===false &&
      rows[0].src==="full planks, cut the last one to fit", JSON.stringify(rows[0].src));
@@ -237,7 +270,7 @@ console.log("\nCONSTRUCTION RULES — enforced by build, not by audit");
 console.log("\nTHE GEOMETRY LOCK — the engine's most important claim");
 // ===========================================================================
 (function(){
-  var cfg=mkCfg(FIXTURES[1]);
+  var cfg=mkCfg(fx('lock'));
   var best=FL.generateCandidates(cfg)[0];
   ok("48\" plank + 16\" offset: every rule passes", best.violations===0 && best.relaxed===0);
   ok("48\" plank + 16\" offset: but the pattern repeats every 3 rows", best.period===3, "period="+best.period);
@@ -310,12 +343,12 @@ ok("joints() returns [] when the first piece already spans the room",
 ok("rowPieces() on a start longer than the room yields one oversize piece",
    eq(FL.rowPieces(200, 155.5, 60), [200]));
 ok("boxPlan clamps a zero perBox to 1, never divides by zero", (function(){
-  var cfg=mkCfg(FIXTURES[0]); cfg.perBox=0;
+  var cfg=mkCfg(fx('kitchen')); cfg.perBox=0;
   var b=FL.boxPlan(FL.generateCandidates(cfg)[0].rows, cfg);
   return b.perBox===1 && b.boxes===b.planks;
 })());
 ok("suggestOffset returns null when there is no room below the floor", (function(){
-  var cfg=mkCfg(FIXTURES[0]); cfg.minOff=8; cfg.plankWid=9;
+  var cfg=mkCfg(fx('kitchen')); cfg.minOff=8; cfg.plankWid=9;
   return FL.suggestOffset(cfg)===null;
 })());
 ok("engine source is the shipped app, not a stale copy", /slice:index\.html|module:/.test(FL.__source), FL.__source);

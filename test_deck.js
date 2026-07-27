@@ -210,6 +210,99 @@ console.log("\nA ONE-CARD DECK IS A VERDICT, NOT A FAILURE TO SEARCH");
 })();
 
 // ===========================================================================
+console.log("\nTHE VERDICT THE ONE-CARD MARKER QUOTES");
+// ===========================================================================
+/* When the deck collapses, the UI puts a marker where Shuffle would be and the
+   (i) behind it explains why, quoting numbers. Those numbers come from HERE —
+   never from copy — so the sentence on screen cannot drift from what the deck
+   actually did. If someone hardcodes "16 candidates" into the string, this is
+   the suite that should have stopped them. */
+ROOMS.forEach(function(room){
+  var r = run(room);
+  var w = D.getDeckWhy();
+  if (room.deck === 1){
+    ok(room.key+": a one-card deck records WHY", !!w);
+    ok(room.key+": ...it reports all "+r.cands.length+" candidates as considered",
+       w && w.considered === r.cands.length, w ? String(w.considered) : 'null');
+    ok(room.key+": ...and the nearest affordable layout's real distance",
+       w && w.nearestGap >= 0 && w.nearestGap < VISIBLE_MIN,
+       w ? w.nearestGap.toFixed(2) : 'null');
+    ok(room.key+": ...measured at the WIDEST ceiling, so 'nothing was skipped' is true",
+       w && w.ceiling === D.getCeilings()[D.getCeilings().length-1],
+       w ? String(w.ceiling) : 'null');
+  } else {
+    // A multi-card room has nothing to explain, and a stale verdict left over
+    // from a previous room would put a marker on a floor that can shuffle.
+    ok(room.key+": a multi-card deck records no verdict (nothing to explain)", w === null,
+       JSON.stringify(w));
+  }
+});
+(function(){
+  // The exact figures the hallway marker prints. Pinned so the copy and the
+  // engine can be compared by eye in a review.
+  var r = run(ROOMS.filter(function(x){ return x.key==='hallway'; })[0]);
+  var w = D.getDeckWhy();
+  ok("hallway marker quotes 16 candidates", w.considered === 16, String(w.considered));
+  ok("hallway marker quotes 1.42\" as the nearest affordable shift",
+     Math.abs(w.nearestGap - 1.42) <= 0.005, w.nearestGap.toFixed(3));
+  // deckVerdict is pure: same candidates in, same verdict out.
+  var again = D.deckVerdict(r.cands);
+  ok("deckVerdict is pure", again.considered === w.considered
+     && Math.abs(again.nearestGap - w.nearestGap) < 1e-9);
+})();
+
+// ===========================================================================
+console.log("\nAND THE UI ACTUALLY BRANCHES ON IT");
+// ===========================================================================
+/* The verdict is only worth computing if the screen uses it. Verified live in
+   both themes; these guard the wiring so the marker cannot quietly stop
+   rendering, or start rendering on a floor that CAN shuffle. */
+(function(){
+  var html = require('fs').readFileSync(require('path').join(__dirname,'index.html'),'utf8');
+  var i = html.indexOf('function oneCardMarker(){');
+  ok("the marker exists", i > 0);
+  var body = html.slice(i, html.indexOf('function renderLayout(', i));
+
+  ok("its copy interpolates the deck's own numbers, not a hardcoded count",
+     /w\.considered/.test(body) && /w\.nearestGap/.test(body));
+  ok("...and no candidate count is written into the string",
+     !/\b16 candidate/.test(body));
+  ok("it carries the one-liner verbatim",
+     /A room this narrow lays one way/.test(body));
+  ok("it is built with textContent, never innerHTML", !/innerHTML/.test(body));
+
+  // Shown to EVERYONE: not .helpdot, which :root[data-guide=expert] hides
+  // wholesale. An expert needs the explanation of a missing control as much as
+  // a beginner does — arguably more, since they will go looking for the button.
+  ok("the marker's dot is NOT .helpdot (which expert mode hides)",
+     !/el\("button","helpdot"\)/.test(body) && /el\("button","whydot"\)/.test(body));
+  ok("...and it carries a data-marker hook for a future visibility rule",
+     /data-marker/.test(body));
+  ok("no expert-mode rule hides .whydot today",
+     !/data-guide="expert"\][^{]*\.whydot/.test(html));
+
+  /* The render branch: the marker is the ELSE of the inline Shuffle condition,
+     so the two are mutually exclusive by construction rather than by two
+     conditions that could drift apart.
+
+     Anchor on `fl-reshuffle`, NOT on the deckSize test — that string appears
+     twice (the overlay toolbar has its own Shuffle, with no marker because a
+     sentence does not belong in a toolbar), and taking the first match tested
+     the wrong one. */
+  var r = html.indexOf('el("button","fl-reshuffle")');
+  ok("the inline Shuffle exists", r > 0);
+  var branch = html.slice(html.lastIndexOf('if ((S.deckSize || 0) > 1){', r), r + 400);
+  ok("Shuffle renders only when the deck has more than one card",
+     /if \(\(S\.deckSize \|\| 0\) > 1\)\{[\s\S]*fl-reshuffle/.test(branch));
+  ok("...and the marker is its else, so they can never both appear",
+     /\} else \{[\s\S]{0,80}card\.appendChild\(oneCardMarker\(\)\);/.test(branch));
+  // The overlay keeps its Shuffle-or-nothing behaviour: no marker there.
+  var ov = html.indexOf('rs.textContent = "↺ Shuffle"');
+  ok("the overlay toolbar shows no marker (a sentence does not belong in a toolbar)",
+     html.slice(ov-300, ov+300).indexOf('oneCardMarker') < 0);
+})();
+
+// ===========================================================================
 console.log("\nCARD 0 IS UNTOUCHED — this is why the deck moved zero goldens");
 // ===========================================================================
 ROOMS.forEach(function(room){
