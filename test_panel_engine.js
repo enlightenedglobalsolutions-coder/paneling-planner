@@ -331,6 +331,93 @@ ok("capForInputs falls back to maxIn when no stock has quantity", (function(){
   var inp=mkInp({roomWidthIn:262,roomDepthIn:150,face:5,offset:18,oc:24,maxIn:180,buffer:12,qty:{}});
   return P.capForInputs(inp)===180;
 })());
+
+// ===========================================================================
+console.log("\nTAKEOFF IS OPTION-SENSITIVE — investigated, not assumed");
+// ===========================================================================
+/* REPORTED: cycling stagger options changes the label but never the takeoff.
+   Investigated before touching anything, because the two obvious fixes point in
+   opposite directions and both would have been wrong here.
+
+   NOT a stale recompute: the cycle handler calls applyActiveOption(), which
+   recomputes STATE.takeoff, and renderLayout() redraws the block. Verified in
+   source and in the browser.
+
+   NOT invariant by design either: computeTakeoff() simulates actually cutting
+   THIS layout — rows grouped by assigned stock, cut longest-first with best-fit
+   offcut reuse. It genuinely moves when the geometry makes it move, and the
+   awkward-run case below proves it (41 boards/7.6% vs 40/5.3%).
+
+   What is true is narrower and less alarming: for the app's DEFAULT inputs it is
+   genuinely equal across all six options. Every option covers the same total
+   length (29 rows x 261.75"), and with a single 12' stock length the offcut
+   reuse absorbs the differing piece counts — option F cuts 84 pieces where the
+   others cut 86, and all six still consume 59 boards.
+
+   So the numbers are right and the user's observation is also right. What is
+   left is presentational, and that is parked as an open question rather than
+   guessed at. These assertions exist so nobody later "optimises" computeTakeoff
+   into a lineal estimate and quietly makes it invariant for real. */
+(function(){
+  function mkInp(o){
+    var gap = o.gap==null ? 0.25 : o.gap;
+    var runIn = o.widthIn - 2*gap, depthIn = o.depthIn - 2*gap;
+    var stock = [8,10,12,14,16].map(function(L){ return {lenIn:L*12, qty:(o.qty[L]||0), ft:L}; });
+    return { runIn:runIn, depthIn:depthIn, face:o.face, offset:o.offset, oc:o.oc,
+             maxIn:o.maxIn, buffer:o.buffer, rows:Math.max(1,Math.ceil(depthIn/o.face)),
+             trusses:P.buildTrusses(runIn, o.offset, o.oc), gap:gap, stock:stock };
+  }
+  function takeoffs(inp){
+    var cap = P.capForInputs(inp), longest = 0;
+    inp.stock.forEach(function(s){ if(s.qty>0 && s.lenIn>longest) longest=Math.min(s.lenIn, inp.maxIn); });
+    P.setLongestStock(longest || cap);
+    var opts = P.generateOptions(inp.trusses, inp.runIn, cap, inp.rows), out = [];
+    opts.forEach(function(o){
+      inp.unitRows = o.unitRows || 1;
+      var a = P.assignStock(inp, o.rowJoints);
+      out.push(a.shortage ? null : P.computeTakeoff(inp, o.rowJoints, a.rowStock));
+    });
+    return { opts:opts, out:out };
+  }
+
+  // 1) It DOES move, on geometry that makes it move.
+  var awkward = takeoffs(mkInp({widthIn:27*12+7, depthIn:11*12, face:6, offset:20, oc:24,
+                                maxIn:192, buffer:12, qty:{8:60,12:60,16:60}}));
+  var boards = awkward.out.filter(Boolean).map(function(t){ return t.totalBoards; });
+  ok("takeoff varies across options when the cut does ("+boards.join(',')+")",
+     new Set(boards).size > 1, boards.join(','));
+  var wastes = awkward.out.filter(Boolean).map(function(t){ return t.wastePct; });
+  ok("...and so does the waste ("+wastes.join(',')+")", new Set(wastes).size > 1);
+
+  // 2) On the app's DEFAULT inputs it does not — and the options are still
+  //    genuinely different layouts, which is what makes the report reasonable.
+  var def = takeoffs(mkInp({widthIn:21*12+10.25, depthIn:12*12, face:5, offset:18, oc:24,
+                            maxIn:192, buffer:12, qty:{12:60}}));
+  var sigs = def.opts.map(function(o){ return JSON.stringify(o.rowJoints); });
+  ok("default inputs still produce 6 DISTINCT layouts", new Set(sigs).size === def.opts.length,
+     new Set(sigs).size+" of "+def.opts.length);
+  var pieces = def.opts.map(function(o){
+    return o.rowJoints.reduce(function(s,j){ return s+j.length+1; }, 0); });
+  ok("...that even differ in total piece count ("+pieces.join(',')+")",
+     new Set(pieces).size > 1);
+  var defBoards = def.out.filter(Boolean).map(function(t){ return t.totalBoards; });
+  ok("...yet all consume the same boards, which is the reported symptom",
+     new Set(defBoards).size === 1, defBoards.join(','));
+
+  // 3) It is a real simulation, not a lineal estimate wearing a costume.
+  var t0 = def.out.filter(Boolean)[0];
+  var covered = def.opts.length ? (mkInp({widthIn:21*12+10.25, depthIn:12*12, face:5, offset:18,
+                                          oc:24, maxIn:192, buffer:12, qty:{12:60}}).runIn * t0.rows) : 0;
+  var consumed = t0.totalBoards * 144;
+  ok("waste% is derived from boards actually consumed vs area covered",
+     Math.abs(t0.wastePct - Math.round(((consumed-covered)/consumed)*1000)/10) < 0.05,
+     t0.wastePct+" vs "+(Math.round(((consumed-covered)/consumed)*1000)/10));
+  ok("boards are counted per stock length, not as one lineal total",
+     Object.keys(t0.byLen).length >= 1 && t0.byLen[12] === t0.totalBoards);
+  ok("the buffer is applied on top, not baked in",
+     t0.withBuffer === Math.ceil(t0.totalBoards*1.12) && t0.leftover === t0.withBuffer-t0.totalBoards);
+})();
+
 ok("engine source is the shipped app, not a stale copy",
    /slice:index\.html|module:/.test(P.__source), P.__source);
 
