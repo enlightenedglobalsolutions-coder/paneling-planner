@@ -89,6 +89,29 @@ var ENGINES = {
               'candidateRows', 'buildPanelLayout', 'auditLayout', 'optionStats',
               'generateOptions', 'assignStock', 'computeTakeoff', 'planOffcuts',
               'capForInputs', 'rowName']
+  },
+
+  // Deck ordering — the Reshuffle layer. Deliberately OUTSIDE the fl slice
+  // (which ends at readInputs) because it runs above the engine: it reorders
+  // what the viewer cycles through and never changes what the engine produced.
+  // That separation is the reason the deck work moved zero goldens, and this
+  // entry is what keeps it honest — if the block ever drifts back into the
+  // engine's range, the fl anchors break rather than the deck silently
+  // becoming part of the pinned output.
+  //
+  // Its one external dependency is S.deckSize, which orderDeck WRITES. The
+  // loader supplies the object so the harness can read the deck size back
+  // exactly the way the UI does.
+  deck: {
+    module: 'deck.js',
+    ranges: [['  var DECK_SLOTS   = 6;', '  function generate(){']],
+    preamble: 'var S = { deckSize: 0 };',
+    accessors: {
+      getDeckSize: 'function(){ return S.deckSize; }',
+      getSlots:    'function(){ return DECK_SLOTS; }',
+      getVisibleMin: 'function(){ return VISIBLE_MIN; }'
+    },
+    exports: ['deckDistance', 'minLoopGap', 'permute', 'buildDeck', 'orderDeck']
   }
 };
 

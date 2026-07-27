@@ -94,6 +94,53 @@ the flooring module's closure and exported via `window.refreshTokens`** — with
 keeps the previous theme's colours while the chrome changes around it. That failure is invisible
 unless you actually toggle the theme with a layout on screen.
 
+Note `applyTheme(pref)` **takes the preference as an argument**. Calling it bare falls through to
+`matchMedia`, so `applyTheme()` after setting `stagger.theme` looks like it did nothing.
+
+## The flooring layout view
+
+### Print and screen are separate wrappers — keep them that way
+`.fl-scroll` (inline) and `.fl-print-diag` (print) were **one shared class**, so tuning the screen
+silently moved the printed sheet. They are now split, and they want opposite things:
+
+- **inline** — `width:100%; max-width:100%; height:auto`, no `width` attribute on the SVG. The
+  whole room fits the screen, never cropped with sideways scroll. `buildSvg` already sets
+  `viewBox` + `preserveAspectRatio`, so this is free; there is no resize listener anywhere in the
+  file and none is needed. The HTML export and the paneling diagram already worked this way — the
+  flooring inline view was the odd one out.
+- **print** — keeps `overflow-x:auto`, `min-width:640px` and the explicit
+  `svg.setAttribute("width", Math.max(660, runIn*1.3))`. It is a paper sheet, not a phone.
+
+If you change one, check the other. Ticking and zoom live in the fullscreen overlay
+(`tappable:false` inline), and the overlay already has Rotate — iOS Safari won't let a web app
+lock orientation, so "rotate your phone" cannot be a button; the control turns the drawing.
+
+### Wood is a material renderer, not a pattern
+Plank tone is `plankTone(cand.seed, row, piece)` — a hash of the **layout's identity**, never of
+`isDone`/`isNow`. Those are view state, and feeding them in makes the floor change colour as rows
+are ticked off. `isDone` may only touch `fill-opacity` (which now fades in *every* view — done rows
+used to keep a full-opacity stroke and so read *brighter* than unfinished ones).
+
+The old `fill = WOOD[(i*5+p*3) % 6]` was a checkerboard: `p*3 % 6` cycles `0,3,0,3`, so **every row
+used exactly two of the six tones, strictly alternating**. That is why it read as a pattern.
+
+Planks carry **no stroke**. Separation comes from a thin bevel — a light catch (`--paper`) along the
+top, a darker shadow (`--ink`) along the bottom, plus an end-joint shadow — all low-opacity and
+theme-derived, so it works in daylight. Grain is 2–3 sparse jittered lines at 0.10α. Background is
+`--ink-2`, the theme ground: **not `--brass`**, which is documented as brass-as-*text* and darkens
+in daylight, so using it as a fill breaks its own contract (that was the gold mat).
+
+**Palette is an input.** `SPECIES` is a plain JS map, defaulting to the `--plank-1..6` theme tokens.
+Deliberately *not* new CSS custom properties: `refreshTokens` reads a fixed prefix and count, so
+every species would need declarations in both theme blocks — O(species × themes) stylesheet edits
+for what is a material choice, not a theme concern. No picker ships yet; the seam is what ships.
+
+### Reshuffle
+Lives directly under the picture inline, and in the overlay bar beside Rotate/Fit — you must be able
+to see the floor and the button that changes it at once. **Both are guarded on `S.deckSize > 1`**:
+with a one-card deck `reshuffle()` would cycle `% 1` and silently do nothing. When the deck is 1 the
+label reads "One clean layout for this room" instead of "Layout 1 of N".
+
 ## Beginner mode (EGS pilot — Stagger defines this pattern)
 
 All help copy lives in **one liftable block, `STAGGER_HELP`**, keyed by the `data-help` attribute
@@ -133,7 +180,12 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 10 suites, 447 assertions.
+if every suite passes, so it is safe in front of a deploy. 11 suites, 567 assertions.
+
+It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
+grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
+is reported as passing with **0 assertions**, which looks like success. End every harness with
+that exact line.
 
 ### `v2-modules/` is gone (Stage 0, 2026-07-26)
 
@@ -161,8 +213,8 @@ var FL = E.load('fl');     // -> require('./fl_engine.js') if it exists
                            // -> else slice index.html between anchors
 ```
 
-Registered engines: `grid`, `fl`, `panel`. **Extracting an engine to a module is a no-op for the
-tests** — proven: writing `grid_geom.js` flips `test_bridge.js` from the slice path to the module
+Registered engines: `grid`, `fl`, `panel`, `deck`. **Extracting an engine to a module is a no-op for
+the tests** — proven: writing `grid_geom.js` flips `test_bridge.js` from the slice path to the module
 path with no harness edit and the same 16/16.
 
 The loader fails **loudly and exits 1 before any assertion**, so a harness that cannot load its
@@ -180,6 +232,14 @@ Two things the registry encodes that are easy to trip over:
   `generate()` ran first. The loader declares the binding and exposes `setLongestStock()`; tests set
   it per case. The impurity only bites when the value crosses a joint-count boundary, which is
   exactly why it went unnoticed.
+- **`deck` is deliberately NOT part of `fl`.** The Reshuffle deck sits *above* the engine — the
+  `fl` range ends at `readInputs()`, and the deck block starts ~50 lines later. That separation is
+  the whole reason the shuffle work moved **zero goldens**: the deck reorders what the viewer
+  cycles through and never changes what the engine produced. `test_deck.js` asserts `out[0] ===
+  cands[0]` for every room, so if the deck ever starts reordering position 0 it fails *there*,
+  with a message saying why, instead of 105 assertions failing in `test_fl_engine.js` with no
+  explanation. `orderDeck` **writes** `S.deckSize`, so the loader supplies `S` and a
+  `getDeckSize()` accessor.
 
 ### The two engine suites are CHARACTERISATION suites
 

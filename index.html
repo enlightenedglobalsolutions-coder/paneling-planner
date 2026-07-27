@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.26-1359';</script>
+<script>window.EGS_VERSION = '2026.07.26-1843';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -266,9 +266,23 @@
   .echo.bad{color:var(--danger)}
 
   /* ===== FLOORING MODULE CSS START ===== */
-  .fl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--ink-2);
+  /* The inline layout FITS the screen. It used to carry a hardcoded pixel width
+     (max(660, runIn*1.3)) plus min-width:640px, so a long room scrolled sideways
+     and you could never see the whole floor at once. buildSvg already sets a
+     viewBox and preserveAspectRatio, so letting the element be 100% wide is all
+     it takes. Same pattern the HTML export and the paneling diagram already use. */
+  .fl-scroll{background:var(--ink-2);border:.5px solid var(--line);border-radius:8px;padding:8px}
+  .fl-scroll svg{display:block;width:100%;max-width:100%;height:auto}
+  /* Print keeps the OLD behaviour on purpose — it is a paper sheet, not a phone,
+     and the two were sharing one class, so a screen change silently moved print. */
+  .fl-print-diag{overflow-x:auto;background:var(--ink-2);
     border:.5px solid var(--line);border-radius:8px;padding:8px}
-  .fl-scroll svg{display:block;height:auto;min-width:640px}
+  .fl-print-diag svg{display:block;height:auto;min-width:640px}
+  /* Directly under the picture it changes — not below the fold. */
+  .fl-reshuffle{display:block;width:100%;margin-top:9px;min-height:var(--tap);
+    font-family:inherit;font-size:14px;font-weight:700;border-radius:var(--radius-sm);
+    border:1px solid var(--brass);background:transparent;color:var(--brass);cursor:pointer}
+  .fl-reshuffle:active{background:var(--brass-fill);color:var(--on-brass);border-color:var(--brass-fill)}
   .fl-hint{font-size:10px;color:var(--paper-faint);text-align:center;padding:5px 0 0}
   .fl-stats{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
   .fl-stat{flex:1 1 44%;background:var(--ink-3);border:.5px solid var(--line);
@@ -2383,7 +2397,7 @@ var FL = (function(){
 
   // ---------- state ----------
   var S = { cfg:null, cands:[], active:0, box:null,
-            view:"blueprint", done:{}, fp:null, jumpTo:null };
+            view:"blueprint", done:{}, fp:null, jumpTo:null, deckSize:0 };
 
   /* Sample-room mode. The demo shows a REAL layout from the real engine, but it
      is a demonstration, not a job you are laying — so row ticking and Reshuffle
@@ -2427,6 +2441,109 @@ var FL = (function(){
     };
   }
 
+  /* ---- the deck ------------------------------------------------------------
+     Shuffle has to LOOK like it did something. Measured across four rooms, 9 of
+     18 consecutive candidates differed by under 2" mean row-start; in a 287x47
+     corridor four deals running sat under 1.4" with every row inside 3". You tap
+     four times and see the same floor.
+
+     Coarsening the dedup does NOT fix that (measured: a 3" bin changed nothing in
+     one room and cost real candidates in two others) because the dedup key is the
+     whole joined row sequence — two layouts 0.3" apart still straddle a bin edge.
+     The fix is which layouts are in the deck, and in what order.
+
+     Three rules:
+       1. Position 0 is never moved. It is the engine's best and what generate()
+          shows first — and it is what test_fl_engine.js pins.
+       2. A card only joins the deck if it is at least VISIBLE_MIN from EVERY card
+          already in it. So the deck is as big as the room can actually support:
+          a corridor with three distinguishable layouts says "Layout 1 of 3"
+          rather than cycling six that look identical.
+       3. The waste ceiling self-tunes. No single value wins — measured, a 20x16
+          room separates best at 1.25x and a 13x11 room needs 1.5x — so try a few
+          and keep whichever deck separates best, tie-broken by less waste.
+
+     This runs at the UI layer, not inside generateCandidates(), on purpose: the
+     engine's output and ranking are what the goldens pin. Reordering the deck for
+     the viewer changes no golden.
+     ------------------------------------------------------------------------- */
+  var DECK_SLOTS   = 6;    // most cards Reshuffle will ever cycle
+  var VISIBLE_MIN  = 3;    // inches of mean row-start difference that reads as "different"
+  var DECK_CEILINGS = [1.0, 1.15, 1.25, 1.4, 1.5];   // waste, relative to the best layout
+
+  function deckDistance(a, b){
+    var n = Math.min(a.rows.length, b.rows.length);
+    if (!n) return 0;
+    var sum = 0;
+    for (var i=0; i<n; i++) sum += Math.abs(a.rows[i].start - b.rows[i].start);
+    return sum / n;
+  }
+  function minLoopGap(seq){
+    if (seq.length < 2) return Infinity;
+    var w = Infinity;
+    for (var i=0; i<seq.length; i++){
+      var d = deckDistance(seq[i], seq[(i+1) % seq.length]);
+      if (d < w) w = d;
+    }
+    return w;
+  }
+  function permute(arr, fn){
+    (function rec(cur, left){
+      if (!left.length){ fn(cur); return; }
+      for (var i=0; i<left.length; i++) rec(cur.concat([left[i]]), left.slice(0,i).concat(left.slice(i+1)));
+    })([], arr);
+  }
+
+  // Farthest-point selection with a visibility floor, then the order whose WORST
+  // step is largest. Greedy alone front-loads the difference and dumps the closest
+  // pair at the end, including the wrap back to card 0 — this does not.
+  function buildDeck(cands, ceiling){
+    var best = cands[0], rest = cands.slice(1);
+    var pool = rest.filter(function(c){ return c.waste <= best.waste * ceiling; });
+    var picked = [];
+    while (picked.length < DECK_SLOTS - 1 && pool.length){
+      var bi = -1, bd = -1;
+      for (var i=0; i<pool.length; i++){
+        var nearest = deckDistance(best, pool[i]);
+        for (var k=0; k<picked.length; k++){
+          var d = deckDistance(picked[k], pool[i]);
+          if (d < nearest) nearest = d;
+        }
+        if (nearest > bd){ bd = nearest; bi = i; }
+      }
+      if (bi < 0 || bd < VISIBLE_MIN) break;   // nothing left that reads as different
+      picked.push(pool.splice(bi,1)[0]);
+    }
+    if (!picked.length) return [best];
+    var bestOrder = picked, bestWorst = -1;
+    permute(picked, function(order){
+      var w = minLoopGap([best].concat(order));
+      if (w > bestWorst){ bestWorst = w; bestOrder = order.slice(); }
+    });
+    return [best].concat(bestOrder);
+  }
+
+  function orderDeck(cands){
+    if (!cands || cands.length < 2){ S.deckSize = cands ? cands.length : 0; return cands || []; }
+    var winner = null;
+    DECK_CEILINGS.forEach(function(ceil){
+      var deck = buildDeck(cands, ceil);
+      var gap  = minLoopGap(deck);
+      var wr   = deck.reduce(function(m,c){ return Math.max(m, c.waste / (cands[0].waste||1)); }, 0);
+      // more cards first, then better separation, then less waste
+      if (!winner || deck.length > winner.deck.length
+          || (deck.length === winner.deck.length && gap > winner.gap + 0.01)
+          || (deck.length === winner.deck.length && Math.abs(gap - winner.gap) <= 0.01 && wr < winner.wr)){
+        winner = { deck:deck, gap:gap, wr:wr };
+      }
+    });
+    S.deckSize = winner.deck.length;
+    // Everything else stays in the array (export, tests, future use) but Reshuffle
+    // only ever cycles S.deckSize cards.
+    var spare = cands.filter(function(c){ return winner.deck.indexOf(c) < 0; });
+    return winner.deck.concat(spare);
+  }
+
   function generate(){
     var cfg = readInputs();
     if (!cfg){ alert("Check the room and plank dimensions — they all need to be above zero."); return; }
@@ -2435,7 +2552,7 @@ var FL = (function(){
       return;
     }
     S.cfg = cfg;
-    S.cands = generateCandidates(cfg);
+    S.cands = orderDeck(generateCandidates(cfg));
     S.active = 0;
     S.box = boxPlan(S.cands[0].rows, cfg);
     // If this is the same layout you were already installing, pick the ticks back up.
@@ -2463,6 +2580,7 @@ var FL = (function(){
 
   function reshuffle(){
     if (!S.cands.length) return;
+    if ((S.deckSize || 0) <= 1) return;   // nothing visibly different to shuffle to
     // Belt and braces: the button is not rendered in sample mode, but this is
     // the call that would clobber a real install's saved ticks, so guard it here
     // too rather than relying on the UI alone.
@@ -2473,7 +2591,9 @@ var FL = (function(){
       if (!window.confirm("You've laid " + doneCount() + " row(s). A different layout renumbers the "
         + "cuts, so that progress will be cleared. Reshuffle anyway?")) return;
     }
-    S.active = (S.active + 1) % Math.min(S.cands.length, 6);
+    // Cycle only the cards that actually look different from each other.
+    var n = Math.max(1, Math.min(S.deckSize || 1, S.cands.length));
+    S.active = (S.active + 1) % n;
     S.box = boxPlan(S.cands[S.active].rows, S.cfg);
     S.fp = fingerprint(S.cfg, S.cands[S.active]);
     S.done = {};
@@ -2634,6 +2754,39 @@ var FL = (function(){
   window.refreshTokens = refreshTokens;
   window.TOK = TOK;
 
+  /* ---- the material ---------------------------------------------------------
+     Wood is a MATERIAL, not a colour ramp. Tone varies per plank, deterministically,
+     from the layout's own identity (seed, row, piece) so it is stable across
+     re-renders, theme changes and reshuffles back to the same card — and never
+     from isDone/isNow, which are view state and would make the floor shimmer as
+     rows are ticked off.
+
+     The palette is an INPUT. --plank-1..6 stay as the default species so the theme
+     contract and daylight behaviour survive, but a species is a material choice,
+     not a light/dark concern: refreshTokens() reads a fixed prefix and count, so
+     putting species in CSS would mean new declarations in BOTH theme blocks for
+     every one. A later stage can derive a palette from a product photo and pass
+     it here without touching the stylesheet. */
+  var SPECIES = {};                 // name -> array of hex tones; empty = use theme default
+  var activeSpecies = null;         // null = --plank-1..6
+
+  function plankPalette(){
+    var s = activeSpecies && SPECIES[activeSpecies];
+    return (s && s.length) ? s : WOOD;
+  }
+  // Small integer hash. Deterministic, no Math.random, stable across processes.
+  function plankHash(seed, row, piece){
+    var v = ((seed|0) * 73856093) ^ ((row+1) * 19349663) ^ ((piece+1) * 83492791);
+    v = (v ^ (v >>> 13)) >>> 0;
+    v = (v * 1274126177) >>> 0;
+    return (v ^ (v >>> 16)) >>> 0;
+  }
+  function plankTone(seed, row, piece){
+    var pal = plankPalette();
+    if (!pal.length) return TOK.ink3;
+    return pal[plankHash(seed, row, piece) % pal.length];
+  }
+
   // One renderer, five skins. opts: {view, rotated, gutter, tappable}
   function buildSvg(cand, cfg, opts){
     opts = opts || {};
@@ -2653,7 +2806,7 @@ var FL = (function(){
     if (opts.rotated) g.setAttribute("transform", "rotate(90) translate(" + GUT + ",-" + H + ")");
     svg.appendChild(g);
 
-    var bg = { blueprint:TOK.ink, seams:TOK.ink2, heat:TOK.ink2, wood:TOK.brass, install:TOK.ink2 }[view];
+    var bg = { blueprint:TOK.ink, seams:TOK.ink2, heat:TOK.ink2, wood:TOK.ink2, install:TOK.ink2 }[view];
     g.appendChild(mk("rect", { x:-GUT, y:0, width:W, height:H, fill:bg }));
 
     var cur = currentRow();
@@ -2677,7 +2830,14 @@ var FL = (function(){
         } else if (view === "heat"){
           fill = TOK.ink2; stroke = TOK.line; sw = 0.4;
         } else if (view === "wood"){
-          fill = WOOD[(i*5+p*3) % WOOD.length]; stroke = TOK.brass; sw = 0.5;
+          // Tone is a deterministic function of the LAYOUT's identity, not of the
+          // loop counters. The old (i*5+p*3)%6 gave p*3%6 = 0,3,0,3... so every
+          // row used exactly TWO of the six tones, alternating — a checkerboard,
+          // which is why it read as a pattern and not as timber.
+          // Seed/row/piece only: never isDone/isNow, which are view state and
+          // would make the floor change colour as rows are ticked off.
+          fill = plankTone(cand.seed, i, p);
+          stroke = "none"; sw = 0;      // bevel edges are drawn below instead
         } else { // install
           fill = isDone ? TOK.ok : isNow ? TOK.warn : TOK.ink3;
           stroke = isNow ? TOK.warn : TOK.line; sw = isNow ? 1.5 : 0.5;
@@ -2691,10 +2851,33 @@ var FL = (function(){
         g.appendChild(rect);
 
         if (view === "wood"){
-          for (var gl=1; gl<3; gl++){
-            g.appendChild(mk("line", { x1:(x+2).toFixed(2), y1:(y+h*gl/3).toFixed(2),
-              x2:(x+len-2).toFixed(2), y2:(y+h*gl/3 + (p%2?0.5:-0.5)).toFixed(2),
-              stroke:"#00000018", "stroke-width":0.5 }));
+          var fade = isDone ? 0.3 : 1;
+          // Bevel: a light catch along the top edge and a soft shadow along the
+          // bottom, so planks read as separate boards rather than cells in a grid.
+          // Both are theme-derived, so this works in daylight too.
+          g.appendChild(mk("line", { x1:x.toFixed(2), y1:y.toFixed(2),
+            x2:(x+len).toFixed(2), y2:y.toFixed(2),
+            stroke:TOK.paper, "stroke-width":0.35, "stroke-opacity":(0.16*fade).toFixed(3) }));
+          g.appendChild(mk("line", { x1:x.toFixed(2), y1:(y+h).toFixed(2),
+            x2:(x+len).toFixed(2), y2:(y+h).toFixed(2),
+            stroke:TOK.ink, "stroke-width":0.5, "stroke-opacity":(0.30*fade).toFixed(3) }));
+          // End joint: a short shadow only, no bright rule.
+          if (p > 0){
+            g.appendChild(mk("line", { x1:x.toFixed(2), y1:y.toFixed(2),
+              x2:x.toFixed(2), y2:(y+h).toFixed(2),
+              stroke:TOK.ink, "stroke-width":0.4, "stroke-opacity":(0.34*fade).toFixed(3) }));
+          }
+          // Grain: sparse and low, and it varies per plank so boards don't stripe
+          // in lockstep. Two or three lines, never the same offsets twice running.
+          var gn = 2 + (plankHash(cand.seed, i, p) % 2);
+          for (var gl=1; gl<=gn; gl++){
+            var frac = gl/(gn+1);
+            var jitter = ((plankHash(cand.seed, i, p+gl*7) % 100)/100 - 0.5) * 0.6;
+            g.appendChild(mk("line", {
+              x1:(x+1.5).toFixed(2), y1:(y+h*frac+jitter).toFixed(2),
+              x2:(x+len-1.5).toFixed(2), y2:(y+h*frac-jitter).toFixed(2),
+              stroke:TOK.ink, "stroke-width":0.3,
+              "stroke-opacity":(0.10*fade).toFixed(3) }));
           }
         }
         if (view === "install" && len > 26){
@@ -2784,6 +2967,15 @@ var FL = (function(){
     var fit = el("button",""); fit.textContent = "Fit";
     fit.addEventListener("click", fitOverlay);
     bar.appendChild(fit);
+
+    if (!inSample() && (S.deckSize || 0) > 1){
+      var rs = el("button",""); rs.textContent = "\u21ba Shuffle";
+      rs.addEventListener("click", function(){
+        reshuffle();
+        drawOverlay(); fitOverlay();
+      });
+      bar.appendChild(rs);
+    }
 
     VIEWS.forEach(function(v){
       var b = el("button", S.view === v.id ? "on" : "");
@@ -2934,7 +3126,10 @@ var FL = (function(){
     if (inSample()) body.appendChild(sampleBanner(cfg));
 
     var card=el("div","card");
-    var lbl=el("p","lbl"); lbl.textContent="Layout "+(S.active+1)+" of "+Math.min(S.cands.length,6);
+    var lbl=el("p","lbl"); var deckN = Math.max(1, Math.min(S.deckSize || 1, S.cands.length));
+    lbl.textContent = deckN > 1
+      ? "Layout " + (S.active+1) + " of " + deckN
+      : "One clean layout for this room";
     card.appendChild(lbl);
 
     var chips=el("div","fl-views");
@@ -2948,12 +3143,20 @@ var FL = (function(){
 
     var scroll=el("div","fl-scroll");
     var svg = buildSvg(cand, cfg, { view:S.view, rotated:false, gutter:true, tappable:false });
-    svg.setAttribute("width", Math.max(660, Math.round(cfg.runIn*1.3)));
+    // No width attribute: the CSS fits it to the card and the viewBox scales.
     scroll.appendChild(svg);
     card.appendChild(scroll);
 
+    if (!inSample() && (S.deckSize || 0) > 1){
+      var rs=el("button","fl-reshuffle");
+      rs.type="button";
+      rs.textContent="\u21ba  Shuffle \u2014 show me another";
+      rs.addEventListener("click", reshuffle);
+      card.appendChild(rs);
+    }
+
     var hint=el("p","fl-hint");
-    hint.textContent="Scroll sideways \u2014 or expand for the whole room";
+    hint.textContent="Tap the floor to zoom, rotate and tick off rows";
     card.appendChild(hint);
 
     if (LEGENDS[S.view]){
@@ -2986,12 +3189,7 @@ var FL = (function(){
     grid.appendChild(statBox(inch(cfg.edgeRip), "First / last row"));
     stats.appendChild(grid);
 
-    if (!inSample()){
-      var btn=el("button","btn");
-      btn.textContent="Reshuffle";
-      btn.addEventListener("click", reshuffle);
-      stats.appendChild(btn);
-    }
+    // (Reshuffle now lives directly under the picture it changes, above.)
     body.appendChild(stats);
 
     var chk=el("div","card");
@@ -3238,7 +3436,7 @@ var FL = (function(){
     stats.appendChild(statBox(inch(cfg.edgeRip), "First / last row"));
     h.appendChild(stats);
 
-    var sc=el("div","fl-scroll");
+    var sc=el("div","fl-print-diag");
     var svg = buildSvg(cand, cfg, { view:"install", rotated:false, gutter:true, tappable:false });
     svg.setAttribute("width", Math.max(660, Math.round(cfg.runIn*1.3)));
     sc.appendChild(svg);
