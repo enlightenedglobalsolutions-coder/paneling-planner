@@ -191,6 +191,44 @@ ok("--brass-fill stays bright in BOTH themes (it is a fill, not text)",
    THEMES.light.brassFill+" / "+THEMES.dark.brassFill);
 
 // ===========================================================================
+console.log("\nPHYSICAL LIGHT USES ABSOLUTE ANCHORS, NOT ROLE TOKENS");
+// ===========================================================================
+/* A bevel catch, a shadow and wood grain model LIGHT. They need "the dark one"
+   and "the light one" — not --paper and --ink, which swap between themes. The
+   Wood renderer shipped with `stroke:TOK.paper` for the highlight and
+   `stroke:TOK.ink` for the shadow: correct at night, INVERTED in daylight. The
+   floor lit itself from below and the grain went pale, for a whole release.
+
+   It hid because the scratch render tool hardcoded those two tokens the wrong
+   way round for light theme, so the daylight render looked plausible. The
+   committed render_svg.js parses them from the stylesheet, which is what
+   surfaced it — the same "parse, don't hardcode" rule this suite runs on. */
+Object.keys(THEMES).forEach(function(name){
+  var T = THEMES[name];
+  M.setTokens(T);
+  ok(name+": the dark anchor really is the darker of the two",
+     M.relLum(M.textOn('#ffffff')) < M.relLum(M.textOn('#000000')));
+  // On a mid-tone plank, a catch must be lighter and a shadow darker than it.
+  var plank = T.plank1 || '#c08a4a';
+  var lighter = M.textOn('#000000'), darker = M.textOn('#ffffff');
+  ok(name+": a catch is lighter than the board it sits on",
+     M.relLum(lighter) > M.relLum(plank), lighter+" vs "+plank);
+  ok(name+": a shadow is darker than the board it sits on",
+     M.relLum(darker) < M.relLum(plank), darker+" vs "+plank);
+});
+(function(){
+  // And the shipped renderer must not reach for the role tokens here.
+  var i = html.indexOf('if (view === "wood"){');
+  var body = html.slice(i, html.indexOf('if (view === "install" && len > 26){', i));
+  ok("the wood bevel uses anchorLight(), not TOK.paper",
+     /stroke:anchorLight\(\)/.test(body) && !/stroke:TOK\.paper\b/.test(body));
+  ok("the wood shadow and grain use anchorDark(), not TOK.ink",
+     /stroke:anchorDark\(\)/.test(body) && !/stroke:TOK\.ink\b/.test(body));
+  ok("...and the anchors are chosen by measured luminance",
+     /function anchorDark\(\)\{\s*return relLum\(TOK\.ink\) < relLum\(TOK\.paper\)/.test(html));
+})();
+
+// ===========================================================================
 console.log("\nDONE IS NOT CARRIED BY COLOUR ALONE");
 // ===========================================================================
 (function(){

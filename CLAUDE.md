@@ -85,6 +85,13 @@ measurably worse than the derived `~0.197` on mid-grey grounds. It maximises con
 manufacture it: **around mid-grey no anchor reaches 4.5:1** (best ≈ 4.06:1), so a state fill must
 not land in that band. `test_contrast.js` pins the band and checks every real ground stays out.
 
+**Anything modelling physical light takes `anchorLight()` / `anchorDark()`, never a role token.**
+A bevel catch, a shadow, wood grain — these need "the light one" and "the dark one" absolutely. The
+Wood renderer shipped with `stroke:TOK.paper` for the highlight and `stroke:TOK.ink` for the shadow:
+correct at night, **inverted in daylight**, so the floor lit itself from below and the grain went
+pale. It hid for a release because the scratch render tool hardcoded those two tokens backwards for
+light theme; `render_svg.js` parses them from the stylesheet, which is what surfaced it.
+
 Text on a coloured *state* fill takes `textOn()`. Text on the page ground keeps `--paper-dim`.
 Do **not** reach for `--paper-dim` on an accent fill — it is deliberately mid-luminance and measures
 1.00:1 on `--ok`, which is the same trap that produced the invisible done-label in the first place.
@@ -101,6 +108,23 @@ Theme is stored in `stagger.theme` (`light`/`dark`/`system`, default `system`). 
 in `<head>`, **before the stylesheet**, resolves the preference to an explicit `data-theme` on
 `<html>` so there is no flash of the wrong theme and CSS never needs a duplicated media-query
 palette. A `matchMedia` listener keeps `system` live.
+
+### Two renderers build SVG as a STRING — interpolate, never paste
+`drawDiagram()` (paneling) and `renderMeasureDiagram()` assemble SVG by concatenation rather than
+through `mk()`. The retheme that swapped hex literals for token names produced
+`fill=TOK.ink3` — an **unquoted attribute whose literal value is the text "TOK.ink3"**. SVG cannot
+parse that as a paint, so it falls back to **black**: every paneling plank body rendered solid black,
+in both themes. The form must be `fill="'+TOK.ink3+'"`.
+
+It hid because the text labels were broken identically, and black text on a light sheet looks
+deliberate — so it read as "the paneling renderer is broken" rather than "every colour in this file
+is". `test_render_colours.js` pins the class: no paint attribute may take a bare identifier, quote a
+token *name*, or use `var()` (which does not resolve in an SVG presentation attribute), and every
+`TOK.<name>` read anywhere must be one `refreshTokens()` actually defines — a typo'd token
+interpolates to `undefined`, which renders black exactly like the original bug.
+
+When sweeping rendered colours at runtime, **exclude `<line>`**: it carries a default black `fill`
+it never paints, and counting it reports ~31 false positives per diagram.
 
 ### The SVG renderers do not follow CSS
 Roughly 80 colours are painted as SVG *attributes*, so a variable swap cannot reach them.
@@ -342,7 +366,7 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 16 suites, 834 assertions.
+if every suite passes, so it is safe in front of a deploy. 17 suites, 859 assertions.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
