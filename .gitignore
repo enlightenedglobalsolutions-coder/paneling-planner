@@ -7,4 +7,8 @@ index.html.bak.*
 # Scratch theme preview — judged locally, never shipped to Pages.
 preview.html
 
+# Output of render_svg.js — regenerate it, don't commit it.
+render-*.svg
+render-*.svg.png
+
 .DS_Store

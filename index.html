@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.26-2031';</script>
+<script>window.EGS_VERSION = '2026.07.27-0734';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -2926,6 +2926,60 @@ var FL = (function(){
     };
   }
 
+  /* ---- legible text on a coloured fill --------------------------------------
+     A done row's cut label used to be painted in --ok — the SAME token as the
+     plank it sits on. 1.00:1. Invisible by construction, in both themes. The
+     current row was as bad: --paper-dim on --warn is 1.09:1 in daylight and
+     1.00:1 in the dark.
+
+     The obvious fix — "use the muted text token" — DOES NOT WORK, and it fails
+     for the same reason the original bug happened. --paper-dim is deliberately
+     MID luminance so it reads as secondary text on the page ground. The state
+     fills straddle it and, worse, they invert between themes: --ok/--warn are
+     DARK swatches in daylight and BRIGHT ones at night. Measured, --paper-dim on
+     --ok is 1.00:1 light and 1.48:1 dark. No single fixed token can sit on both.
+
+     So pick against the ground the text actually lands on: near-ink on a light
+     ground, near-paper on a dark one. Same idea --on-brass already encodes for
+     text on --brass-fill, generalised to a computed background. */
+  function relLum(hex){
+    var c = hexRgb(hex).map(function(v){
+      v /= 255;
+      return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4);
+    });
+    return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  }
+  function mixHex(fg, bg, a){
+    var f = hexRgb(fg), b = hexRgb(bg);
+    return rgbHex([0,1,2].map(function(i){ return f[i]*a + b[i]*(1-a); }));
+  }
+  /* Pick by MEASURED luminance, never by token name. --ink and --paper are ROLE
+     tokens — ink is the surface, paper is the text — so they SWAP between
+     themes: in daylight TOK.ink is #f4f5f6 (light) and TOK.paper is #1c2026
+     (dark), and at night it is the other way round. A `relLum(bg) > k ? TOK.ink
+     : TOK.paper` reads as "dark text on a light ground" and is correct in
+     exactly one theme; in the other it inverts both choices and every pair
+     fails. That is precisely the bug this function exists to fix, so it must not
+     reintroduce it one line down.
+
+     The crossover is COMPUTED, not a hardcoded constant: it is the ground at
+     which both anchors give equal contrast, i.e. the geometric mean of their
+     offset luminances. A hand-picked 0.22 was measurably wrong — it chose the
+     pale anchor on a mid-grey ground where the dark one scored better. Deriving
+     it means the pick stays optimal if the tokens ever move.
+
+     Note this maximises contrast; it cannot manufacture it. Around mid-grey NO
+     anchor clears 4.5:1 (best ~4.06:1), so a state fill must not land there —
+     `test_contrast.js` pins the unusable band and checks the real grounds sit
+     outside it. */
+  function textOn(bg){
+    var a = relLum(TOK.ink), b = relLum(TOK.paper);
+    var darker  = a < b ? TOK.ink : TOK.paper;
+    var lighter = a < b ? TOK.paper : TOK.ink;
+    var cross = Math.sqrt((Math.min(a,b)+0.05) * (Math.max(a,b)+0.05)) - 0.05;
+    return relLum(bg) > cross ? darker : lighter;
+  }
+
   /* Baseline for a label centred in its row, clamped so the glyph box never
      hangs outside the sheet. A first/last row is only edgeRip wide and edgeRip
      may be as little as minRip (2"), while the labels are 5.2 and 6.4 units
@@ -3012,11 +3066,17 @@ var FL = (function(){
           stroke = isNow ? TOK.warn : TOK.line; sw = isNow ? 1.5 : 0.5;
         }
 
+        // Install used to be the ONE view where a finished row did not fade, so
+        // completed work stayed as loud as the row you are actually laying.
+        // Fading it here makes install agree with every other view, and it is
+        // what gives the done label a quiet ground to sit on.
+        var doneFade = (isDone && view === "install") ? 0.30 : 0;
+
         var rect = mk("rect", { x:x.toFixed(2), y:y.toFixed(2), width:len.toFixed(2),
                                 height:h.toFixed(2), fill:fill });
         if (sw > 0){ rect.setAttribute("stroke", stroke); rect.setAttribute("stroke-width", sw); }
-        // Completed work fades back in every view, not just the install one.
-        if (isDone && view !== "install") rect.setAttribute("fill-opacity", "0.3");
+        // Completed work fades back in EVERY view now, install included.
+        if (isDone) rect.setAttribute("fill-opacity", doneFade ? String(doneFade) : "0.3");
         g.appendChild(rect);
 
         if (view === "wood"){
@@ -3106,10 +3166,21 @@ var FL = (function(){
           // That also caused the clipping: cancelling the rotation puts the
           // label's long dimension on the room's NARROW axis, so first- and
           // last-row labels overflowed the viewBox by 2.6"-4.2".
+          /* Label colour comes from the GROUND, never from the plank's own fill.
+             Pending rows sit on --ink-3 and keep --paper-dim, which is the right
+             secondary-text role there and already clears 4.5:1. Done and current
+             rows sit on a coloured fill, so they take the theme-appropriate
+             extreme instead — see textOn(). */
+          var ground = isDone ? mixHex(TOK.ok, bg, doneFade)
+                     : isNow ? TOK.warn
+                     : TOK.ink3;
           var t = mk("text", { x:(x+len/2).toFixed(2), y:labelBaseline(y,h,5.2,cfg).toFixed(2),
             "font-size":"5.2", "text-anchor":"middle", "font-family":"monospace",
-            fill: isDone ? TOK.ok : TOK.paperDim });
-          t.textContent = Math.abs(len-cfg.plankLen) < 0.01 ? "full" : inch(len);
+            fill: (isDone || isNow) ? textOn(ground) : TOK.paperDim });
+          // A tick as well as a colour: "done" should not be carried by hue
+          // alone, on a screen held at arm's length in a half-lit room.
+          t.textContent = (isDone ? "✓ " : "")
+            + (Math.abs(len-cfg.plankLen) < 0.01 ? "full" : inch(len));
           g.appendChild(t);
         }
         x += len;

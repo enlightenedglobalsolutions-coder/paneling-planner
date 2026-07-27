@@ -72,6 +72,23 @@ Direction is **Charcoal & Brass**: cool neutral grounds, brass reserved for acce
 kept where it belongs (the plank ramp). Every text/background pair clears **WCAG 4.5:1 in both
 themes** — if you change a colour, re-check it.
 
+### `--ink` and `--paper` SWAP between themes — never pick a token by name
+They are **role** tokens: `--ink*` is the surface, `--paper*` is the text. So in daylight
+`TOK.ink` is `#f4f5f6` (light) and `TOK.paper` is `#1c2026` (dark); at night it is the other way
+round. Code like `relLum(bg) > k ? TOK.ink : TOK.paper` *reads* as "dark text on a light ground"
+and is correct in **exactly one theme** — in the other it inverts every choice and every pair
+fails contrast. It passed every dark-theme check and broke daylight.
+
+Use **`textOn(bg)`**, which picks by measured luminance. Its crossover is *computed* — the geometric
+mean of the two anchors' offset luminances — not a hand-picked constant; a hardcoded `0.22` was
+measurably worse than the derived `~0.197` on mid-grey grounds. It maximises contrast but cannot
+manufacture it: **around mid-grey no anchor reaches 4.5:1** (best ≈ 4.06:1), so a state fill must
+not land in that band. `test_contrast.js` pins the band and checks every real ground stays out.
+
+Text on a coloured *state* fill takes `textOn()`. Text on the page ground keeps `--paper-dim`.
+Do **not** reach for `--paper-dim` on an accent fill — it is deliberately mid-luminance and measures
+1.00:1 on `--ok`, which is the same trap that produced the invisible done-label in the first place.
+
 **Brass has two tokens and they are not interchangeable:**
 - `--brass-fill` — brass as a **fill** (buttons, pills). Stays bright `#C89A34` in *both* themes.
 - `--brass` — brass as **text** on the ground. Darkens to `#8a6410` in daylight, or it fails
@@ -220,7 +237,7 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 13 suites, 633 assertions.
+if every suite passes, so it is safe in front of a deploy. 14 suites, 676 assertions.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
@@ -255,7 +272,9 @@ var FL = E.load('fl');     // -> require('./fl_engine.js') if it exists
 
 Registered engines: `grid`, `fl`, `panel`, `deck`, `material`, `label`. The last two are not
 engines in the layout sense — they are the pure arithmetic behind how the drawing *looks*, sliced
-out because `buildSvg` itself touches the DOM and cannot be. **Extracting an engine to a module is a no-op for
+out because `buildSvg` itself touches the DOM and cannot be. (`textOn`/`relLum`/`mixHex` ride along
+inside `material`'s range and share its hex helpers, so `test_contrast.js` loads `material` too.)
+**Extracting an engine to a module is a no-op for
 the tests** — proven: writing `grid_geom.js` flips `test_bridge.js` from the slice path to the module
 path with no harness edit and the same 16/16.
 

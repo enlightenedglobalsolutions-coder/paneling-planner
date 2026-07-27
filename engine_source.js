@@ -130,11 +130,17 @@ var ENGINES = {
     preamble: 'var WOOD = [], TOK = { ink3:"#eeeeee" };',
     accessors: {
       setPalette: 'function(a){ WOOD.length = 0; a.forEach(function(c){ WOOD.push(c); }); }',
+      setTokens:  'function(t){ Object.keys(t).forEach(function(k){ TOK[k] = t[k]; }); }',
       getSpread:  'function(){ return PLANK_SPREAD; }',
       getWarmth:  'function(){ return PLANK_WARMTH; }'
     },
+    // textOn/relLum/mixHex sit inside the same range and share its hex helpers,
+    // so they are exported here rather than sliced again. They need a LIVE TOK —
+    // the whole point of textOn is that TOK.ink and TOK.paper swap between
+    // themes — hence setTokens rather than a fixed preamble value.
     exports: ['plankTone', 'plankGrain', 'plankHash', 'plankRand',
-              'shadeTone', 'warmTone', 'plankPalette']
+              'shadeTone', 'warmTone', 'plankPalette',
+              'relLum', 'mixHex', 'textOn']
   },
 
   // Label placement. buildSvg() itself touches the DOM and cannot be sliced, but
