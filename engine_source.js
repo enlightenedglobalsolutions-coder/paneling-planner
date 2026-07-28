@@ -58,7 +58,7 @@ var ENGINES = {
     exports: ['joints', 'clearance', 'tailLen', 'rowPieces', 'legalStarts',
               'pickFresh', 'buildLayout', 'audit', 'wasteOf', 'uniqueStarts',
               'shortestPeriod', 'generateCandidates', 'boxPlan', 'isLocked',
-              'suggestOffset']
+              'suggestOffset', 'bandRowPlan', 'bandedCfg', 'clearanceAbs', 'absJoints']
   },
 
   // Base paneling engine. NOT contiguous: assignStock / computeTakeoff /

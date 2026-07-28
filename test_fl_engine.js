@@ -182,6 +182,90 @@ FIXTURES.forEach(function(f){
   ok(f.key+": full-structure digest "+f.sha, E.digest(cands)===f.sha, E.digest(cands));
 });
 
+
+/* ---------------------------------------------------------------------------
+   L FIXTURES — banded fields, pinned the same way the rectangles are.
+
+   These went in BEFORE any screen could route an L here, so the engine's answer
+   and the test's expectation come from one place. They are keyed like the rest;
+   never index this array.
+
+   `runs` is the per-row run length. It is the whole point: the sequence carries
+   straight through the corner — row 6 of `lclean` starts at 17.5", not back at a
+   full plank — which is what "one continuous field, no restart" means in
+   numbers rather than prose.
+   --------------------------------------------------------------------------- */
+var L_BASE = { plankLen:60, plankWid:9, minOff:16, minReuse:20, minRip:2,
+               gap:0.25, perBox:8, rotate:4 };
+var L_FIXTURES = [
+  { key:'lclean', why:"notch lands on a course line — no corner rip at all",
+    bands:[{depthIn:45,runIn:240,runStartIn:0},{depthIn:45,runIn:120,runStartIn:0}],
+    nRows:10, ripCount:0, layable:true, narrowestRip:null,
+    runs:[240,240,240,240,240,120,120,120,120,120],
+    widths:[9,9,9,9,9,9,9,9,9,9],
+    cands:16, ties:0,
+    starts:[60,34,16.5,58,39.5,17.5,59.5,42.5,19.5,58.5],
+    metrics:{seed:3,guard:true,violations:0,relaxed:0,waste:152,unique:10,period:10},
+    box:{planks:38,boxes:5,perBox:8}, sha:'ab41a96c7518ddf7' },
+
+  { key:'lrip', why:"notch falls mid-row — the board at the inside corner is ripped",
+    bands:[{depthIn:30,runIn:240,runStartIn:0},{depthIn:54,runIn:120,runStartIn:0}],
+    nRows:11, ripCount:2, layable:true, narrowestRip:3,
+    runs:[240,240,240,240,120,120,120,120,120,120,120],
+    widths:[6,9,9,6,3,9,9,9,9,9,6],
+    cands:16, ties:0,
+    starts:[60,34,16.5,58,39.5,17.5,59.5,42.5,19.5,58.5,40.5],
+    metrics:{seed:3,guard:true,violations:0,relaxed:0,waste:131,unique:11,period:11},
+    box:{planks:38,boxes:5,perBox:8}, sha:'dd8473ea7cf74b92' }
+];
+function lfx(key){
+  var f = L_FIXTURES.filter(function(x){ return x.key === key; })[0];
+  if (!f){ console.log("FAIL  no L fixture named '"+key+"'"); process.exit(1); }
+  return f;
+}
+
+// ===========================================================================
+console.log("\nL GOLDENS — the banded field");
+// ===========================================================================
+L_FIXTURES.forEach(function(f){
+  var cfg = FL.bandedCfg(f.bands, L_BASE);
+  var cands = FL.generateCandidates(cfg);
+  var best = cands[0];
+  var box = FL.boxPlan(best.rows, cfg);
+
+  ok(f.key+": "+f.nRows+" rows ("+f.why+")", cfg.nRows===f.nRows, "got "+cfg.nRows);
+  ok(f.key+": row widths unchanged", eq(cfg.widths, f.widths), JSON.stringify(cfg.widths));
+  ok(f.key+": per-row runs unchanged",
+     eq(cfg.rowRuns.map(function(r){ return r.runIn; }), f.runs),
+     JSON.stringify(cfg.rowRuns.map(function(r){ return r.runIn; })));
+  ok(f.key+": "+f.ripCount+" corner rip rows", cfg.plan.ripCount===f.ripCount,
+     "got "+cfg.plan.ripCount);
+  ok(f.key+": every rip is layable", cfg.plan.layable===f.layable);
+  if (f.narrowestRip != null)
+    ok(f.key+": narrowest rip "+f.narrowestRip+'"',
+       near(cfg.plan.narrowestRip, f.narrowestRip), String(cfg.plan.narrowestRip));
+
+  ok(f.key+": "+f.cands+" candidates after dedup", cands.length===f.cands, "got "+cands.length);
+  ok(f.key+": tie exposure still "+f.ties, tieCount(cands)===f.ties);
+  ok(f.key+": start sequence unchanged", eq(starts(best.rows), f.starts),
+     JSON.stringify(starts(best.rows)));
+  ok(f.key+": metrics unchanged",
+     best.violations===f.metrics.violations && best.relaxed===f.metrics.relaxed &&
+     near(best.waste,f.metrics.waste) && best.unique===f.metrics.unique &&
+     best.period===f.metrics.period,
+     JSON.stringify({v:best.violations,r:best.relaxed,w:best.waste,u:best.unique,p:best.period}));
+  ok(f.key+": boxPlan "+f.box.planks+" planks", eq(box,f.box), JSON.stringify(box));
+  ok(f.key+": full-structure digest "+f.sha, E.digest(cands)===f.sha, E.digest(cands));
+
+  // The continuity requirement, in numbers: the first row of the SECOND band
+  // must not restart at a full plank. That restart is exactly what the rejected
+  // per-band adapter did, and exactly what broke the seam rule.
+  var k = -1;
+  for (var i=1;i<f.runs.length;i++) if (f.runs[i] !== f.runs[i-1]){ k = i; break; }
+  ok(f.key+": the leg does NOT restart at a full plank (row "+(k+1)+" starts "+best.rows[k].start+'")',
+     Math.abs(best.rows[k].start - L_BASE.plankLen) > 0.001);
+});
+
 // ===========================================================================
 console.log("\nDETERMINISM — the property the goldens rest on");
 // ===========================================================================

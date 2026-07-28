@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.27-1348';</script>
+<script>window.EGS_VERSION = '2026.07.27-1926';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -2303,6 +2303,43 @@ var FL = (function(){
     }
     return out;
   }
+  /* ---- rows that do not all share one run ---------------------------------
+     A rectangle has one run length and every row starts at x = 0, so a joint's
+     row-local position IS its room position. An L does not: the leg's rows are
+     shorter and may begin further along the wall. The seam rule is about where
+     joints land IN THE ROOM — two joints 16" apart in row-local terms are on top
+     of each other if the rows start 16" apart — so once runs differ, every
+     comparison has to be made in room coordinates.
+
+     `cfg.rowRuns` is the whole mechanism: absent (every rectangle) these return
+     cfg.runIn and 0, the arithmetic is identical to what it has always been, and
+     no rectangle golden can move. Present, each row carries its own run. */
+  function rowRunAt(cfg, idx){
+    var rr = cfg.rowRuns;
+    if (!rr || !rr.length) return { runIn: cfg.runIn, xStart: 0 };
+    return rr[idx] || rr[rr.length-1];
+  }
+  function absJoints(s, runIn, P, xStart){
+    var j = joints(s, runIn, P);
+    if (!xStart) return j;
+    return j.map(function(v){ return v + xStart; });
+  }
+  // Clearance in ROOM coordinates. With xStart 0 and room-local prevAbs this is
+  // exactly clearance() above — which is why rectangles are unaffected.
+  function clearanceAbs(s, xStart, prevAbs, runIn, P){
+    if (!prevAbs || !prevAbs.length) return Infinity;
+    var mine = absJoints(s, runIn, P, xStart);
+    if (!mine.length) return Infinity;
+    var best = Infinity;
+    for (var i=0;i<mine.length;i++){
+      for (var j=0;j<prevAbs.length;j++){
+        var d = Math.abs(mine[i]-prevAbs[j]);
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
   // Best clearance any FUTURE row could achieve against phase 0 and phase s.
   // Joints repeat every P, so this is a closed form — used by the lookahead guard.
   function bestFutureClearance(s, P){
@@ -2311,11 +2348,14 @@ var FL = (function(){
   }
 
   // ---------- candidate starts ----------
-  function legalStarts(prevJ, backJ, minOff, runIn, P, guard){
-    var out=[];
+  // prevJ/backJ are ROOM-coordinate joint lists; xStart offsets this row into the
+  // room. Both default to today's behaviour (xStart 0), so a rectangle takes the
+  // identical path it always has.
+  function legalStarts(prevJ, backJ, minOff, runIn, P, guard, xStart){
+    var out=[], x = xStart || 0;
     for (var s=MIN_FRESH; s<=P+0.001; s+=STEP){
-      var dA = clearance(s, prevJ, runIn, P);
-      var dB = clearance(s, backJ, runIn, P);
+      var dA = clearanceAbs(s, x, prevJ, runIn, P);
+      var dB = clearanceAbs(s, x, backJ, runIn, P);
       if (dA < minOff || dB < minOff) continue;
       if (guard && bestFutureClearance(s, P) < minOff) continue;
       out.push({ s:s, score: Math.min(dA, dB) });
@@ -2325,9 +2365,10 @@ var FL = (function(){
 
   // Pick a fresh start. Relaxes the offset toward plank width only if nothing
   // is legal — and reports it, rather than silently accepting a violation.
-  function pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard, recent){
-    var cands = legalStarts(prevJ, backJ, minOff, runIn, P, guard);
-    if (!cands.length && guard) cands = legalStarts(prevJ, backJ, minOff, runIn, P, false);
+  function pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard, recent, xStart){
+    var x = xStart || 0;
+    var cands = legalStarts(prevJ, backJ, minOff, runIn, P, guard, x);
+    if (!cands.length && guard) cands = legalStarts(prevJ, backJ, minOff, runIn, P, false, x);
     if (recent && recent.length){
       var novel = cands.filter(function(c){
         return !recent.some(function(x){ return Math.abs(x-c.s) < STEP*2; });
@@ -2337,14 +2378,14 @@ var FL = (function(){
     var relaxed = false, eff = minOff;
     while (!cands.length && eff > W){
       eff = Math.max(W, eff - 1);
-      cands = legalStarts(prevJ, backJ, eff, runIn, P, false);
+      cands = legalStarts(prevJ, backJ, eff, runIn, P, false, x);
       relaxed = true;
     }
     if (!cands.length){
       // Truly over-constrained. Minimise the violation instead of pretending.
       var best=null;
       for (var s=MIN_FRESH; s<=P+0.001; s+=STEP){
-        var sc = Math.min(clearance(s,prevJ,runIn,P), clearance(s,backJ,runIn,P));
+        var sc = Math.min(clearanceAbs(s,x,prevJ,runIn,P), clearanceAbs(s,x,backJ,runIn,P));
         if (!best || sc > best.score) best = { s:s, score:sc };
       }
       return { start: best.s, relaxed: true };
@@ -2364,17 +2405,36 @@ var FL = (function(){
     function rnd(){ st = (st*1103515245 + 12345) & 0x7fffffff; return st/0x7fffffff; }
 
     var rows=[], bank={};
+    /* ONE continuous field. There is no per-band call and no restart: the
+       sequence runs from the first row to the last, whatever run each row has.
+       That is the fix at the root for the seam breaks — building each band with
+       its own buildLayout() call meant band two began at a hardcoded full plank
+       with no knowledge of the rows above it, which is precisely how a joint
+       could land on top of its neighbour across the corner. */
+    var g0 = rowRunAt(cfg, 0);
     // Row 1: full planks, last one cut to fit.
     var s1 = P;
-    rows.push({ n:1, start:s1, joints:joints(s1,runIn,P), pieces:rowPieces(s1,runIn,P),
-                offcut:0, relaxed:false, src:"full planks, cut the last one to fit" });
-    var t1 = tailLen(s1, runIn, P);
+    /* A rectangle's row carries NO per-run fields. That is not tidiness: the
+       goldens hash the whole row structure, so attaching runIn/xStart to every
+       row would move every rectangle digest without changing a single layout.
+       A row only records its run when the field actually has more than one. */
+    var multi = !!(cfg.rowRuns && cfg.rowRuns.length);
+    var row1 = { n:1, start:s1,
+                 joints:joints(s1,g0.runIn,P), pieces:rowPieces(s1,g0.runIn,P),
+                 offcut:0, relaxed:false, src:"full planks, cut the last one to fit" };
+    if (multi){ row1.runIn = g0.runIn; row1.xStart = g0.xStart; }
+    rows.push(row1);
+    var t1 = tailLen(s1, g0.runIn, P);
     bank[1] = (Math.abs(t1-P) > 0.001) ? t1 : 0;
     rows[0].offcut = bank[1];
 
-    var prevJ = rows[0].joints, backJ = null;
+    // Joints are carried in ROOM coordinates so the seam rule means the same
+    // thing on both sides of the corner.
+    var prevJ = absJoints(s1, g0.runIn, P, g0.xStart), backJ = null;
 
     for (var i=2; i<=cfg.nRows; i++){
+      var g = rowRunAt(cfg, i-1);
+      runIn = g.runIn;
       var start=null, src=null, relaxed=false;
 
       // The offcut chain is deterministic, so left alone it locks into a short
@@ -2387,24 +2447,30 @@ var FL = (function(){
 
       // Skip-a-row offcut reuse. Row 3 is always fresh — reusing row 2's offcut
       // for row 3 is exactly what produces a stair-step.
-      if (i !== 3 && bank[i-2] && bank[i-2] >= cfg.minReuse){
+      // ONE offcut pool. The bank is not per band — a piece cut off in the main
+      // run is a piece of board, and it starts a leg row exactly as readily as
+      // it starts another main row. It has to clear the run it is going INTO,
+      // which is why the checks below use this row's run, not the donor's.
+      if (i !== 3 && bank[i-2] && bank[i-2] >= cfg.minReuse && bank[i-2] <= runIn + 0.001){
         var c = bank[i-2];
-        if (clearance(c, prevJ, runIn, P) >= minOff &&
-            clearance(c, backJ, runIn, P) >= minOff && !isRepeat(c)){
+        if (clearanceAbs(c, g.xStart, prevJ, runIn, P) >= minOff &&
+            clearanceAbs(c, g.xStart, backJ, runIn, P) >= minOff && !isRepeat(c)){
           start = c; src = "start with row " + (i-2) + "'s offcut";
         }
       }
       if (start === null){
-        var f = pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard && i===2, recent);
+        var f = pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard && i===2, recent, g.xStart);
         start = f.start; relaxed = f.relaxed;
         src = relaxed ? "fresh plank cut to length — clearance relaxed" : "fresh plank cut to length";
       }
       var t = tailLen(start, runIn, P);
-      var r = { n:i, start:start, joints:joints(start,runIn,P), pieces:rowPieces(start,runIn,P),
+      var r = { n:i, start:start,
+                joints:joints(start,runIn,P), pieces:rowPieces(start,runIn,P),
                 offcut:(Math.abs(t-P) > 0.001 ? t : 0), relaxed:relaxed, src:src };
+      if (multi){ r.runIn = runIn; r.xStart = g.xStart; }
       rows.push(r);
       bank[i] = r.offcut;
-      backJ = prevJ; prevJ = r.joints;
+      backJ = prevJ; prevJ = absJoints(start, runIn, P, g.xStart);
     }
     return rows;
   }
@@ -2412,11 +2478,18 @@ var FL = (function(){
   // ---------- scoring ----------
   // Re-check every row against the hard rules. The engine's own bookkeeping does
   // not get a vote here — this is an independent audit of the finished layout.
+  /* The seam rule, audited independently of the builder — and in ROOM
+     coordinates. Judging it row-locally would let a leg row whose joints sit
+     directly under a main-run row's joints pass, because the two rows measure
+     from different walls. That is the exact class of silent break this stage
+     exists to kill, so the auditor must not share the builder's blind spot. */
   function audit(rows, cfg){
-    var v=0, P=cfg.plankLen, runIn=cfg.runIn;
+    var v=0, P=cfg.plankLen;
+    function abs(r){ return absJoints(r.start, r.runIn || cfg.runIn, P, r.xStart || 0); }
     for (var i=1;i<rows.length;i++){
-      if (clearance(rows[i].start, rows[i-1].joints, runIn, P) < cfg.minOff - 0.001) v++;
-      if (i>=2 && clearance(rows[i].start, rows[i-2].joints, runIn, P) < cfg.minOff - 0.001) v++;
+      var ri = rows[i], x = ri.xStart || 0, run = ri.runIn || cfg.runIn;
+      if (clearanceAbs(ri.start, x, abs(rows[i-1]), run, P) < cfg.minOff - 0.001) v++;
+      if (i>=2 && clearanceAbs(ri.start, x, abs(rows[i-2]), run, P) < cfg.minOff - 0.001) v++;
     }
     return v;
   }
@@ -2518,6 +2591,124 @@ var FL = (function(){
       if (best && best.violations === 0 && !isLocked(best, probe)) return m;
     }
     return null;
+  }
+
+  /* ---- the row plan for a banded field ------------------------------------
+     Turns a band profile into the per-row geometry buildLayout() needs. Rows are
+     laid out across the WHOLE depth first — one field, not one per band — and
+     only then cut where a band boundary falls inside a row.
+
+     THE CORNER RIP. If a boundary lands mid-row, that row cannot be one board:
+     above the line it runs the main length, below it stops at the leg. So the
+     plank is ripped along the notch and the row becomes two narrower rows, each
+     with its own run. That is the rip the trade expects, and it is reported the
+     same way an edge rip is — a row whose width is less than a full plank.
+
+     When the boundary falls exactly on a row edge there is no rip, and when
+     there is only ONE band this returns precisely what readInputs() computes for
+     a rectangle. That is what lets an L with a zero notch collapse onto the
+     rectangle path instead of merely resembling it. */
+  function bandRowPlan(bands, W, minRip){
+    var total = 0;
+    bands.forEach(function(b){ total += b.depthIn; });
+
+    // Identical row/rip maths to readInputs(), over the whole depth.
+    var nRows = Math.ceil(total / W);
+    var edge  = (total - (nRows-2)*W) / 2;
+    if (nRows >= 3 && edge < minRip){ nRows += 1; edge = (total - (nRows-2)*W) / 2; }
+    if (nRows < 2){ nRows = 2; edge = total/2; }
+    var widths = [];
+    if (nRows === 2){ widths = [total/2, total/2]; }
+    else { widths.push(edge); for (var k=0;k<nRows-2;k++) widths.push(W); widths.push(edge); }
+
+    /* Interior boundaries, as depths — but ONLY where the run actually changes.
+       A boundary between two bands of the same run and the same start is not a
+       corner; it is an artifact of how the profile happened to be described, and
+       ripping a plank there would invent a seam the room does not have. This is
+       what makes an L with a zero notch collapse ONTO the rectangle path rather
+       than merely resemble it — the checkpoint that caught it. */
+    var bounds = [], acc = 0;
+    for (var i=0;i<bands.length-1;i++){
+      acc += bands[i].depthIn;
+      var a = bands[i], b = bands[i+1];
+      var sameRun = Math.abs(a.runIn - b.runIn) < 0.001
+                 && Math.abs((a.runStartIn||0) - (b.runStartIn||0)) < 0.001;
+      if (!sameRun) bounds.push(acc);
+    }
+
+    function bandAt(depth){
+      var a = 0;
+      for (var b=0;b<bands.length;b++){
+        a += bands[b].depthIn;
+        if (depth < a - 0.001) return b;
+      }
+      return bands.length - 1;
+    }
+
+    var out = [], y = 0, ripped = 0;
+    widths.forEach(function(h){
+      // every boundary strictly inside this row splits it
+      var cuts = bounds.filter(function(b){ return b > y + 0.001 && b < y + h - 0.001; });
+      var segStart = y;
+      cuts.concat([y+h]).forEach(function(edgeAt, idx){
+        var segH = edgeAt - segStart;
+        if (segH <= 0.001) return;
+        var bd = bands[bandAt(segStart + segH/2)];
+        out.push({ width: segH, runIn: bd.runIn, xStart: bd.runStartIn || 0,
+                   band: bandAt(segStart + segH/2),
+                   rip: cuts.length > 0 });
+        if (cuts.length > 0) ripped++;
+        segStart = edgeAt;
+      });
+      y += h;
+    });
+
+    /* SLIVERS. A corner rip is only layable if it is at least as wide as the
+       edge-rip floor the same engine already enforces at the walls. When the
+       notch falls a fraction inside a row it does not: measured across 5,776
+       notch depths, 37% of corner rips came out under 2" and the worst was
+       0.125". A board that thin cannot be cut, carried or held down.
+
+       This is reported, never silently emitted. Resolving it is a trade
+       decision — nudge the starting rip so the notch lands on a course, let the
+       neighbouring board run through and scribe it, or absorb it across the two
+       rows — and each answer changes the floor the customer gets. So the plan
+       carries the evidence and the caller decides. */
+    var slivers = out.filter(function(r){ return r.rip && r.width < minRip - 0.001; });
+
+    return { nRows: out.length, widths: out.map(function(r){ return r.width; }),
+             rowRuns: out.map(function(r){ return { runIn:r.runIn, xStart:r.xStart }; }),
+             rows: out, ripCount: ripped, edgeRip: edge, totalDepth: total,
+             nominalRows: nRows,
+             slivers: slivers.length,
+             narrowestRip: out.reduce(function(m,r){
+               return r.rip ? Math.min(m, r.width) : m; }, Infinity),
+             layable: slivers.length === 0 };
+  }
+
+  /* A cfg for a banded area, built the same way readInputs() builds one for a
+     rectangle so the two cannot drift. `base` supplies the plank and rule
+     parameters the user set; `bands` supplies the geometry. */
+  function bandedCfg(bands, base){
+    var plan = bandRowPlan(bands, base.plankWid, base.minRip);
+    var longest = 0;
+    bands.forEach(function(b){ if (b.runIn > longest) longest = b.runIn; });
+    var cfg = {
+      runIn: longest, acrossIn: plan.totalDepth,
+      plankLen: base.plankLen, plankWid: base.plankWid, minOff: base.minOff,
+      minReuse: base.minReuse, minRip: base.minRip, gap: base.gap,
+      perBox: base.perBox, rotate: base.rotate,
+      nRows: plan.nRows, widths: plan.widths, edgeRip: plan.edgeRip
+    };
+    // Only a genuinely multi-run field carries rowRuns; a single band must
+    // produce a cfg indistinguishable from the rectangle path.
+    var runs = plan.rowRuns;
+    var uniform = runs.every(function(r){
+      return Math.abs(r.runIn - runs[0].runIn) < 0.001 && Math.abs((r.xStart||0) - (runs[0].xStart||0)) < 0.001;
+    });
+    if (!uniform){ cfg.rowRuns = runs; cfg.plan = plan; }
+    else { cfg.runIn = runs[0].runIn; }
+    return cfg;
   }
 
   // ---------- state ----------

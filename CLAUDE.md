@@ -313,6 +313,49 @@ dishonest failure this app is written against. Pinning lands in Stage 5; `area.p
 paneling-shaped (`{scenarioFt, boards}`) and `saveCurrentArea` rebuilds from a 16-name allowlist
 that would erase any new field on the next re-measure.
 
+### The L field engine (shipped; the dispatch is NOT flipped)
+The engine can lay a banded field. The Stage 3 dispatch still refuses L areas — see the sliver
+finding below — so this is capability sitting behind a closed door, deliberately.
+
+**One continuous field.** `buildLayout` runs **one** sequence over the whole field with each row
+carrying its own run (`cfg.rowRuns`). There is no per-band call and nothing to restart: the first
+row of the leg continues the stagger rather than opening on a full plank. That restart is exactly
+what the rejected adapter did, and exactly what broke the seam rule.
+
+**Room coordinates, everywhere.** `clearanceAbs()` and `audit()` compare joints where they actually
+are, not where each row measures from. This is why the old 5% was *silent*: two rows measuring from
+different walls looked 60″ apart row-locally while sitting on top of each other in the room. The
+auditor must not share the builder's blind spot. Sweep result: **5% → 0%** across 256 geometries,
+with the notch-spanning rows asserted explicitly (a global "0 violations" would have passed the old
+code too).
+
+**Rectangles are untouched by construction.** `cfg.rowRuns` absent ⇒ every helper returns
+`cfg.runIn`/0 and the arithmetic is what it always was. Rows only carry `runIn`/`xStart` when the
+field genuinely has more than one — attaching them unconditionally moved every rectangle *digest*
+without changing a single layout, which is a golden moving and was reverted, not re-goldened.
+
+**A zero-notch L collapses ONTO the rectangle path**, not merely near it: same cfg, same digest, no
+`rowRuns`. `bandRowPlan` only treats a boundary as a corner **where the run actually changes** — a
+first cut split at every band boundary and invented a seam the room does not have. The checkpoint
+caught it.
+
+**One offcut pool.** The bank is not per band; a piece cut in the main run starts a leg row (measured:
+22.4% of candidate layouts do it). It must *fit* the run it is going into, and is checked against
+that row's run, not the donor's.
+
+### KNOWN, and why the dispatch is still closed: corner slivers
+When the notch falls a fraction inside a row, the corner rip comes out below the same `minRip` floor
+the engine enforces at the walls. Measured across 5,776 notch depths: **37% of corner rips are under
+2″, worst 0.125″**; across the 256-geometry sweep, **176 of 256 (69%) produce at least one**. A board
+that thin cannot be cut, carried or held down.
+
+`bandRowPlan` reports it (`slivers`, `narrowestRip`, `layable`) and never emits it quietly. Resolving
+it is a **trade decision** with three defensible answers — nudge the starting rip so the notch lands
+on a course, let the neighbouring board run through and scribe it, or absorb the difference across
+the two rows — and each changes the floor the customer gets. So the engine measures; it does not
+choose. **The refusal message only retires when the capability truly exists**, and for 69% of L
+geometries it does not yet.
+
 ### L-shapes refuse, with the evidence
 Not because it is hard — because **both fakes were measured and both were worse than saying no**:
 
@@ -366,7 +409,7 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 17 suites, 867 assertions.
+if every suite passes, so it is safe in front of a deploy. 18 suites, 946 assertions.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
