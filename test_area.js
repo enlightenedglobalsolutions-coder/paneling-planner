@@ -55,8 +55,31 @@ function area(bands, rect, ok_){
      zero.engineInput.kind === 'rect');
   ok("...but is refused, because the dispatch counts bands", J.stgAreaRect(zero)===null);
 
-  ok("two bands -> refused", J.stgAreaRect(area([{},{}], null))===null);
-  ok("three bands -> refused", J.stgAreaRect(area([{},{},{}], null))===null);
+  /* TWO bands now route to the engine, because the L field is proven: 256
+     geometries swept, zero seam breaks, nothing unlayable. THREE still refuse —
+     a three-band field has two corners and nothing has swept two corners
+     interacting. The refusal retires per shape as each shape is proven, not per
+     stage. */
+  var L = J.stgAreaField(area([{depthIn:30,runIn:240,runStartIn:0},
+                               {depthIn:54,runIn:120,runStartIn:0}], null));
+  ok("two bands -> laid as an L", !!L && L.kind === 'L');
+  ok("...carrying both bands through to the engine", L.bands.length === 2);
+  ok("three bands -> still refused (two corners, unswept)",
+     J.stgAreaField(area([{depthIn:9,runIn:99,runStartIn:0},
+                          {depthIn:9,runIn:88,runStartIn:0},
+                          {depthIn:9,runIn:77,runStartIn:0}], null))===null);
+  ok("...and stgAreaRect still answers the narrower question",
+     J.stgAreaRect(area([{depthIn:30,runIn:240,runStartIn:0},
+                         {depthIn:54,runIn:120,runStartIn:0}], null))===null);
+
+  // Two bands of the SAME run is a rectangle wearing a profile — it must take
+  // the rectangle path so it cannot possibly differ from one.
+  var flat = J.stgAreaField(area([{depthIn:60,runIn:240,runStartIn:0},
+                                  {depthIn:72,runIn:240,runStartIn:0}], null));
+  ok("two bands of equal run collapse to the rectangle path",
+     !!flat && flat.kind === 'rect');
+  ok("...with the depths summed", flat.rect.acrossIn === 132 && flat.rect.runIn === 240,
+     JSON.stringify(flat.rect));
 
   // Belt and braces: one band but no rect payload, and a failed read.
   ok("one band with a NULL rect -> refused (the two agree or nobody lays)",
@@ -71,10 +94,11 @@ function area(bands, rect, ok_){
 
   // And the source really does test bands, not kind — a future edit that
   // "simplifies" this back to kind==='rect' should fail here, not in the field.
-  var i = html.indexOf('function stgAreaRect(area){');
+  var i = html.indexOf('function stgAreaField(area){');
   var body = html.slice(i, html.indexOf('function stgShowAreaLayout(', i));
-  ok("stgAreaRect counts bands", /bands\.length !== 1/.test(body));
-  ok("...and does NOT dispatch on kind", !/kind\s*===\s*['"]rect['"]/.test(body));
+  ok("the dispatch counts bands", /bands\.length === 1/.test(body) && /bands\.length === 2/.test(body));
+  ok("...and never dispatches on engineInput.kind",
+     !/e\.kind\s*===|\.profile\.kind\s*===/.test(body));
 })();
 
 // ===========================================================================
@@ -211,13 +235,25 @@ console.log("\nL-SHAPES REFUSE HONESTLY");
 // ===========================================================================
 (function(){
   var i = html.indexOf('function stgAreaRefusal(area){');
-  var body = html.slice(i, html.indexOf('// The one way back', i));
+  // Strip comments: the block carries a note QUOTING the old, now-false line so
+  // nobody reinstates it, and a raw grep matches the quotation and reports the
+  // bug as still present. Same trap as the rotate(-90) assertion in test_labels.
+  // Strip BLOCK comments whole, not line-by-line: a continuation line inside a
+  // /* */ run does not start with a marker, so a per-line filter leaves it in.
+  var body = html.slice(i, html.indexOf('// The one way back', i))
+                 .replace(/\/\*[\s\S]*?\*\//g, '')
+                 .replace(/\/\/.*$/gm, '');
 
   ok("the band count is interpolated, not hardcoded",
      /bands \+ " bands"/.test(body) && !/"2 bands"/.test(body));
-  ok("it says what it would cost to fake it", /over 40% high/.test(body));
-  ok("it says the workaround was tried and measured",
-     /256 L-shapes/.test(body) && /one in twenty/.test(body));
+  ok("it says what it would cost to fake it", /over-count the boards by more than 40%/.test(body));
+  ok("it says the workaround was tried and measured", /one L in\s*\n?\s*"?\s*\+?\s*"?twenty/.test(body));
+  // It must not claim a capability the app no longer lacks. The previous copy
+  // said "Stagger lays rectangles for now", which stopped being true the moment
+  // two bands started laying — a refusal that misstates the app is worse than a
+  // blunt one.
+  ok("it does NOT claim rectangles are the limit", !/lays rectangles for now/.test(body));
+  ok("...and it says what IS laid", /lays a single step/.test(body));
   // NB: the copy is a concatenation in source, so match a fragment that does not
   // span a `+` boundary — an earlier version failed on the join, not the text.
   ok("it reassures about what is NOT lost",
@@ -256,7 +292,7 @@ console.log("\nTHE LAYOUT VIEW SURVIVED THE RE-HOST");
   ok("the badge names the parameters it used",
      /From Setup: /.test(html) && /One plank size applies to every area for now/.test(html));
   ok("...and the join closes the jobs overlay before showing the layout",
-     /stgCloseJobs\(\);[\s\S]{0,400}FL\.showArea\(/.test(html));
+     /stgCloseJobs\(\);[\s\S]{0,900}FL\.showArea/.test(html));
 })();
 
 // run_tests.sh greps for a line matching ^N passed, M failed — keep this format.

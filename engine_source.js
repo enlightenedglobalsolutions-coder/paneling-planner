@@ -104,7 +104,10 @@ var ENGINES = {
   // exactly the way the UI does.
   deck: {
     module: 'deck.js',
-    ranges: [['  var DECK_SLOTS   = 6;', '  function generate(){']],
+    // NB the end anchor carries generate()'s parameter. It gained one when the
+    // banded-field path landed (a cfg override), and this loader failed loudly
+    // rather than silently slicing the wrong range — which is the whole point.
+    ranges: [['  var DECK_SLOTS   = 6;', '  function generate(cfgOverride){']],
     preamble: 'var S = { deckSize: 0, deckWhy: null };',
     accessors: {
       getDeckSize: 'function(){ return S.deckSize; }',
@@ -157,7 +160,7 @@ var ENGINES = {
       ['// Lossless inches -> a Setup field.', 'function stgShowAreaLayout(i){'],
       ['function parseMeas(str, defUnit){',    '// Read a measurement field']
     ],
-    exports: ['stgInchField', 'stgAreaRect', 'parseMeas', 'fracVal']
+    exports: ['stgInchField', 'stgAreaField', 'stgAreaRect', 'parseMeas', 'fracVal']
   },
 
   // The demo rooms. Not an engine at all — a config table — but it is sliced the

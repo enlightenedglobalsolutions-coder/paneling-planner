@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.27-1926';</script>
+<script>window.EGS_VERSION = '2026.07.27-2119';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -2612,7 +2612,9 @@ var FL = (function(){
     var total = 0;
     bands.forEach(function(b){ total += b.depthIn; });
 
-    // Identical row/rip maths to readInputs(), over the whole depth.
+    // Row/rip maths identical to readInputs(), over the whole depth. Courses are
+    // NEVER split — see below — so this is the final row division, and the only
+    // rips in it are the edge rips at the two walls, exactly as in a rectangle.
     var nRows = Math.ceil(total / W);
     var edge  = (total - (nRows-2)*W) / 2;
     if (nRows >= 3 && edge < minRip){ nRows += 1; edge = (total - (nRows-2)*W) / 2; }
@@ -2621,78 +2623,100 @@ var FL = (function(){
     if (nRows === 2){ widths = [total/2, total/2]; }
     else { widths.push(edge); for (var k=0;k<nRows-2;k++) widths.push(W); widths.push(edge); }
 
-    /* Interior boundaries, as depths — but ONLY where the run actually changes.
-       A boundary between two bands of the same run and the same start is not a
-       corner; it is an artifact of how the profile happened to be described, and
-       ripping a plank there would invent a seam the room does not have. This is
-       what makes an L with a zero notch collapse ONTO the rectangle path rather
-       than merely resemble it — the checkpoint that caught it. */
-    var bounds = [], acc = 0;
-    for (var i=0;i<bands.length-1;i++){
-      acc += bands[i].depthIn;
-      var a = bands[i], b = bands[i+1];
-      var sameRun = Math.abs(a.runIn - b.runIn) < 0.001
-                 && Math.abs((a.runStartIn||0) - (b.runStartIn||0)) < 0.001;
-      if (!sameRun) bounds.push(acc);
-    }
+    // Band extents down the depth axis.
+    var spans = [], acc = 0;
+    bands.forEach(function(b){ spans.push({ y0:acc, y1:acc+b.depthIn, band:b }); acc += b.depthIn; });
 
-    function bandAt(depth){
-      var a = 0;
-      for (var b=0;b<bands.length;b++){
-        a += bands[b].depthIn;
-        if (depth < a - 0.001) return b;
-      }
-      return bands.length - 1;
-    }
-
-    var out = [], y = 0, ripped = 0;
+    var out = [], y = 0, scribes = 0;
     widths.forEach(function(h){
-      // every boundary strictly inside this row splits it
-      var cuts = bounds.filter(function(b){ return b > y + 0.001 && b < y + h - 0.001; });
-      var segStart = y;
-      cuts.concat([y+h]).forEach(function(edgeAt, idx){
-        var segH = edgeAt - segStart;
-        if (segH <= 0.001) return;
-        var bd = bands[bandAt(segStart + segH/2)];
-        out.push({ width: segH, runIn: bd.runIn, xStart: bd.runStartIn || 0,
-                   band: bandAt(segStart + segH/2),
-                   rip: cuts.length > 0 });
-        if (cuts.length > 0) ripped++;
-        segStart = edgeAt;
+      var y0 = y, y1 = y + h;
+      var hit = spans.filter(function(sp){ return sp.y1 > y0 + 0.001 && sp.y0 < y1 - 0.001; });
+      if (!hit.length) hit = [spans[spans.length-1]];
+
+      /* THE BOARD RUNS THROUGH AND IS SCRIBED.
+         A course that straddles the corner is not cut lengthwise into two
+         narrower courses. It is laid whole, spanning the FURTHEST wall it meets,
+         and the part that overhangs the shorter band is scribed to the corner —
+         which is what a floor layer actually does, and it leaves the field in
+         full-width courses instead of putting a seam along the notch line.
+
+         Splitting was the first model and it was wrong twice over: it invented a
+         course boundary the room does not have, and when the notch fell close to
+         a course line it produced a strip below the rip floor — 0.125" at worst,
+         on 69% of swept geometries. Running the board through removes that
+         failure by construction rather than mitigating it: no split, no sliver. */
+      var x0 = Infinity, x1 = -Infinity;
+      hit.forEach(function(sp){
+        var a = sp.band.runStartIn || 0;
+        if (a < x0) x0 = a;
+        if (a + sp.band.runIn > x1) x1 = a + sp.band.runIn;
       });
+
+      var sc = null;
+      if (hit.length > 1){
+        // Where the wall steps, and how much of this course overhangs it.
+        var shallow = hit.reduce(function(m,sp){
+          return (sp.band.runIn < m.band.runIn) ? sp : m; }, hit[0]);
+        var deep = hit.reduce(function(m,sp){
+          return (sp.band.runIn > m.band.runIn) ? sp : m; }, hit[0]);
+        if (Math.abs(shallow.band.runIn - deep.band.runIn) > 0.001){
+          var cut = (shallow.y0 > deep.y0) ? shallow.y0 : shallow.y1;   // the corner depth
+          sc = { atDepth: cut,
+                 keepFrom: (shallow.band.runStartIn||0) + shallow.band.runIn,
+                 keepTo:   x1,
+                 // how deep the scribed piece is, measured within this course
+                 depth: Math.abs((shallow.y0 > deep.y0 ? shallow.y0 : shallow.y1) - y0) };
+          if (sc.depth > h - 0.001) sc.depth = h;
+          scribes++;
+        }
+      }
+
+      out.push({ width: h, runIn: x1 - x0, xStart: x0,
+                 band: hit[0] === spans[0] ? 0 : spans.indexOf(hit[0]),
+                 scribe: sc });
       y += h;
     });
 
-    /* SLIVERS. A corner rip is only layable if it is at least as wide as the
-       edge-rip floor the same engine already enforces at the walls. When the
-       notch falls a fraction inside a row it does not: measured across 5,776
-       notch depths, 37% of corner rips came out under 2" and the worst was
-       0.125". A board that thin cannot be cut, carried or held down.
-
-       This is reported, never silently emitted. Resolving it is a trade
-       decision — nudge the starting rip so the notch lands on a course, let the
-       neighbouring board run through and scribe it, or absorb it across the two
-       rows — and each answer changes the floor the customer gets. So the plan
-       carries the evidence and the caller decides. */
-    var slivers = out.filter(function(r){ return r.rip && r.width < minRip - 0.001; });
-
+    /* No course is ever split, so the only rips are the edge rips the rectangle
+       path already produces — a corner can no longer generate a sliver at all.
+       `layable` is kept in the shape callers already read, and is now structural
+       rather than a measurement that might come back false. */
     return { nRows: out.length, widths: out.map(function(r){ return r.width; }),
              rowRuns: out.map(function(r){ return { runIn:r.runIn, xStart:r.xStart }; }),
-             rows: out, ripCount: ripped, edgeRip: edge, totalDepth: total,
-             nominalRows: nRows,
-             slivers: slivers.length,
-             narrowestRip: out.reduce(function(m,r){
-               return r.rip ? Math.min(m, r.width) : m; }, Infinity),
-             layable: slivers.length === 0 };
+             rows: out, edgeRip: edge, totalDepth: total, nominalRows: nRows,
+             scribeCount: scribes,
+             ripCount: 0, slivers: 0, narrowestRip: Infinity, layable: true };
   }
 
   /* A cfg for a banded area, built the same way readInputs() builds one for a
      rectangle so the two cannot drift. `base` supplies the plank and rule
      parameters the user set; `bands` supplies the geometry. */
   function bandedCfg(bands, base){
+    /* THE EXPANSION GAP. readInputs() subtracts it from the room before the
+       engine ever sees a dimension — the floor stops short of every wall so the
+       boards can move. A banded field is measured the same way and needs the
+       same treatment, or an L would be laid hard against its walls while a
+       rectangle of the same room was not. Each band loses it at both ends of its
+       run; the field loses it once at each end of the depth. */
+    var g = base.gap || 0;
+    bands = bands.map(function(b){
+      return { depthIn: b.depthIn, runIn: b.runIn - 2*g, runStartIn: (b.runStartIn||0) + g };
+    });
+    if (bands.length){
+      bands[0].depthIn -= g;
+      bands[bands.length-1].depthIn -= g;
+    }
     var plan = bandRowPlan(bands, base.plankWid, base.minRip);
-    var longest = 0;
-    bands.forEach(function(b){ if (b.runIn > longest) longest = b.runIn; });
+    // The field's EXTENT — furthest wall minus nearest, not the furthest wall
+    // alone. Measuring from zero counts the near-wall gap a second time, which
+    // showed up as a 240" room reporting itself as 240.25" on the badge.
+    var near = Infinity, far = -Infinity;
+    bands.forEach(function(b){
+      var a = b.runStartIn || 0;
+      if (a < near) near = a;
+      if (a + b.runIn > far) far = a + b.runIn;
+    });
+    var longest = far - near;
     var cfg = {
       runIn: longest, acrossIn: plan.totalDepth,
       plankLen: base.plankLen, plankWid: base.plankWid, minOff: base.minOff,
@@ -2900,8 +2924,12 @@ var FL = (function(){
     return winner.deck.concat(spare);
   }
 
-  function generate(){
-    var cfg = readInputs();
+  /* `cfgOverride` is how a banded field gets in. A rectangle cannot express two
+     runs in two Setup fields, so an L builds its cfg from the SAME Setup
+     parameters plus its own geometry and hands it here — one generate(), one
+     ranking, one deck. Without an override this is byte-for-byte the old path. */
+  function generate(cfgOverride){
+    var cfg = cfgOverride || readInputs();
     if (!cfg){ alert("Check the room and plank dimensions — they all need to be above zero."); return; }
     if (cfg.plankLen <= cfg.minOff){
       alert("The plank is shorter than the minimum joint offset. Lower the offset or the layout can't stagger.");
@@ -2957,6 +2985,23 @@ var FL = (function(){
     return true;
   }
   function exitArea(){ areaMode = false; AREA = null; }
+
+  /* A banded (L) area. Parameters still come from Setup — readInputs() supplies
+     the plank, the stagger rule and the gap — and only the GEOMETRY comes from
+     the area, so the badge's "From Setup" line stays true and there is still one
+     source for the numbers. */
+  function showAreaField(bands, meta){
+    var base = readInputs();
+    if (!base){ alert("Check the plank dimensions — they all need to be above zero."); return false; }
+    areaMode = true;
+    AREA = meta || null;
+    generate(bandedCfg(bands, base));
+    if(!S.cands.length){ areaMode = false; AREA = null; return false; }
+    S.done = {};
+    renderLayout();
+    renderCuts();
+    return true;
+  }
 
   function reshuffle(){
     if (!S.cands.length) return;
@@ -3434,7 +3479,11 @@ var FL = (function(){
     var cur = currentRow();
 
     for (var i=0; i<cand.rows.length; i++){
-      var r = cand.rows[i], y = rowY(cfg,i), h = cfg.widths[i], x = 0;
+      // x is the row's own start along the run. Zero for every rectangle and for
+      // the common L (both bands flush to one wall); non-zero only when a band
+      // begins further along, where drawing from 0 would put the leg in the
+      // wrong place without anything failing.
+      var r = cand.rows[i], y = rowY(cfg,i), h = cfg.widths[i], x = r.xStart || 0;
       var isDone = !!S.done[r.n], isNow = (r.n === cur);
 
       // neighbours, for the heatmap
@@ -4178,6 +4227,19 @@ var FL = (function(){
         : "Offcut " + inch(r.offcut) + " \u2014 scrap";
       b.appendChild(keep);
     }
+    /* The corner. The course that meets the inside corner is laid whole and the
+       overhang is scribed to the wall — so it is reported here, in the same
+       place and the same voice as the offcut and the edge rips, rather than
+       being something the layer discovers on their knees. */
+    var sc = (cfg.plan && cfg.plan.rows[r.n-1]) ? cfg.plan.rows[r.n-1].scribe : null;
+    if (sc){
+      var scn=el("div","fl-note");
+      scn.textContent = "Inside corner at " + inch(sc.keepFrom) + " \u2014 run this course "
+                      + "whole and scribe the last " + inch(sc.keepTo - sc.keepFrom)
+                      + " down to " + inch(sc.depth);
+      b.appendChild(scn);
+      var st=el("span","fl-tag relax"); st.textContent="scribe"; b.appendChild(st);
+    }
     if (r.relaxed){
       var t=el("span","fl-tag relax"); t.textContent="relaxed clearance"; b.appendChild(t);
     } else if (r.src.indexOf("offcut") >= 0){
@@ -4288,6 +4350,7 @@ var FL = (function(){
     exitSample: exitSample,
     inSample: inSample,
     showArea: showArea,
+    showAreaField: showAreaField,
     exitArea: exitArea,
     inArea: inArea,
     renderLayout: renderLayout,
@@ -7104,34 +7167,81 @@ var AREA_PREV_ROOM = null;
 // and quietly change the room before the engine ever saw it.
 function stgInchField(v){ return String(v) + '"'; }
 
-// One band => a rectangle the engine can lay. Anything else is honest refusal.
-function stgAreaRect(area){
+/* What the engine can lay, and what it still cannot.
+
+   ONE band  -> a rectangle. Unchanged path, unchanged output.
+   TWO bands -> an L. The engine carries the stagger straight through the corner
+                and scribes the course that meets it; swept across 256 L
+                geometries with zero seam breaks and nothing unlayable.
+   MORE      -> still refused. A three-band field has two corners, and nothing
+                has swept two corners interacting. The refusal retires per shape,
+                as each shape is actually proven — not per stage.
+
+   Dispatch counts BANDS, never `kind`: kind is 'rect' when bands.length <= 1,
+   so a shape that produced no bands at all reads as a rectangle. */
+function stgAreaField(area){
   var e = area && area.engineInput;
   if (!e || !e.ok) return null;
   var bands = (e.profile && e.profile.bands) ? e.profile.bands : [];
-  if (bands.length !== 1) return null;
-  if (!e.rect || !(e.rect.runIn > 0) || !(e.rect.acrossIn > 0)) return null;
-  return e.rect;
+
+  if (bands.length === 1){
+    if (!e.rect || !(e.rect.runIn > 0) || !(e.rect.acrossIn > 0)) return null;
+    return { kind:'rect', rect:e.rect };
+  }
+  if (bands.length === 2){
+    var good = bands.every(function(b){ return b.runIn > 0 && b.depthIn > 0; });
+    if (!good) return null;
+    // Two bands of the same run is a rectangle wearing a profile; send it down
+    // the rectangle path so it cannot possibly differ from one.
+    if (Math.abs(bands[0].runIn - bands[1].runIn) < 0.001 &&
+        Math.abs((bands[0].runStartIn||0) - (bands[1].runStartIn||0)) < 0.001){
+      return { kind:'rect', rect:{ runIn:bands[0].runIn,
+                                   acrossIn:bands[0].depthIn + bands[1].depthIn } };
+    }
+    return { kind:'L', bands:bands };
+  }
+  return null;
+}
+// Kept as the rectangle-only question, for callers that mean exactly that.
+function stgAreaRect(area){
+  var f = stgAreaField(area);
+  return (f && f.kind === 'rect') ? f.rect : null;
 }
 
 function stgShowAreaLayout(i){
   var area = JOB && JOB.areas ? JOB.areas[i] : null;
   if (!area) return;
-  var rect = stgAreaRect(area);
-  if (!rect){ stgAreaRefusal(area); return; }
+  var field = stgAreaField(area);
+  if (!field){ stgAreaRefusal(area); return; }
 
   AREA_PREV_ROOM = { len:$("f-len-ft").value, wid:$("f-wid-ft").value };
   AREA_PREV_MODE = MODE;
   setMode("floor", {quiet:true});          // switchScreen dispatches on MODE
-  stgSetRoom(stgInchField(rect.runIn), stgInchField(rect.acrossIn));
 
+  // The Setup fields carry the room for a rectangle, and the field's overall
+  // extent for an L — the badge names what was measured either way, and the
+  // plank/rule parameters come from those same fields in both cases.
+  var meta = { name:area.name, jobName:(JOB && JOB.name) || "" };
+  var okShow;
   stgCloseJobs();                          // #jobsOverlay is z-index 9000; the
                                            // fullscreen layout overlay is 80, so
                                            // Expand would land UNDERNEATH it.
-  if(!FL.showArea({ name:area.name, jobName:(JOB && JOB.name) || "",
-                    runIn:rect.runIn, acrossIn:rect.acrossIn })){
-    switchScreen("s-setup");               // bad dims -> generate() already alerted
+  if (field.kind === 'rect'){
+    stgSetRoom(stgInchField(field.rect.runIn), stgInchField(field.rect.acrossIn));
+    meta.runIn = field.rect.runIn; meta.acrossIn = field.rect.acrossIn;
+    okShow = FL.showArea(meta);
+  } else {
+    var runMax = 0, depth = 0;
+    field.bands.forEach(function(b){
+      if ((b.runStartIn||0) + b.runIn > runMax) runMax = (b.runStartIn||0) + b.runIn;
+      depth += b.depthIn;
+    });
+    stgSetRoom(stgInchField(runMax), stgInchField(depth));
+    meta.runIn = runMax; meta.acrossIn = depth;
+    meta.bands = field.bands;
+    okShow = FL.showAreaField(field.bands, meta);
   }
+  if(!okShow){ switchScreen("s-setup"); }  // bad dims -> generate() already alerted
 }
 
 /* The refusal.
@@ -7158,18 +7268,24 @@ function stgAreaRefusal(area){
   var shape = bands > 1 ? (bands + " bands")
             : (e && e.ok) ? "no clean bands"
             : "a shape it could not read";
+  /* NOTE: this copy was corrected when the L field shipped, because the previous
+     line — "Stagger lays rectangles for now" — became untrue the moment two
+     bands started laying. A refusal that misstates what the app can do is worse
+     than a blunt one. Wording is flagged for review; the facts in it are
+     measured. */
   stgSheet({
-    title: "This area steps — Stagger lays rectangles for now",
+    title: "Two steps in this area — Stagger lays one for now",
     subject: { name: area.name,
                detail: fmtSqft(area.sqft || 0) + " sq ft · " + shape },
-    body: "Stagger read this area as " + shape + ". It could lay the bounding box "
-        + "instead and the drawing would look right, but the board count came out "
-        + "over 40% high in testing — you would buy a third of a room you do not "
-        + "have. A workaround was tried too: across 256 L-shapes it broke the "
-        + "joint-spacing rule on one in twenty without saying so. Doing it "
-        + "properly means teaching the engine to carry joints across a step, and "
-        + "that is its own piece of work. Your measurements and square footage "
-        + "are safe — this is the layout only.",
+    body: "Stagger reads this area as " + shape + ", which means more than one "
+        + "inside corner. It lays a single step — an L — carrying the stagger "
+        + "straight through the corner and scribing the board that meets it. Two "
+        + "corners interacting has not been proven yet, and the shortcuts are "
+        + "worse than waiting: laying the bounding box instead would draw a "
+        + "clean-looking floor and over-count the boards by more than 40%, and a "
+        + "band-by-band workaround broke the joint-spacing rule on one L in "
+        + "twenty without saying so. Your measurements and square footage are "
+        + "safe — this is the layout only.",
     cancelLabel: "Got it"
   });
 }

@@ -74,9 +74,12 @@ console.log("\nHARD CHECKPOINT — an L with a zero notch IS a rectangle");
    corner, so there must be no rowRuns, no rip, and the identical cfg — which
    means the identical layout, byte for byte. A first cut split at EVERY band
    boundary and failed this, inventing a seam the room does not have. */
-[[155.5,131.5],[239.5,191.5],[287.5,47.5],[203.375,97.5],[119.5,6.5]].forEach(function(d){
+// ROOM dimensions in, post-gap dimensions expected out — bandedCfg subtracts the
+// expansion gap the same way readInputs() does.
+[[156,132],[240,192],[288,48],[203.875,98],[120,7]].forEach(function(room){
+  var d = [room[0]-2*BASE.gap, room[1]-2*BASE.gap];
   var rect = rectCfg(d[0], d[1]);
-  var band = FL.bandedCfg(bands(d[1]*0.4, d[0], d[1]*0.6, d[0]), BASE);
+  var band = FL.bandedCfg(bands(room[1]*0.4, room[0], room[1]*0.6, room[0]), BASE);
   ok(d[0]+"x"+d[1]+": cfg is identical to the rectangle path",
      JSON.stringify(rect)===JSON.stringify(band));
   ok(d[0]+"x"+d[1]+": ...so the layout digest is identical",
@@ -84,9 +87,9 @@ console.log("\nHARD CHECKPOINT — an L with a zero notch IS a rectangle");
   ok(d[0]+"x"+d[1]+": ...and it carries no per-row runs at all", !band.rowRuns);
 });
 // The three demo rooms specifically: a zero-notch L must reproduce their goldens.
-[['156x132','f2b63670853b129c',155.5,131.5],
- ['240x192','87381dd7b2d49096',239.5,191.5],
- ['288x48', 'f24aeef20b8b0439',287.5,47.5]].forEach(function(g){
+[['156x132','f2b63670853b129c',156,132],
+ ['240x192','87381dd7b2d49096',240,192],
+ ['288x48', 'f24aeef20b8b0439',288,48]].forEach(function(g){
   var band = FL.bandedCfg(bands(g[3]*0.5, g[2], g[3]*0.5, g[2]), BASE);
   ok("a zero-notch L reproduces the "+g[0]+" golden exactly",
      E.digest(FL.generateCandidates(band))===g[1]);
@@ -100,10 +103,14 @@ console.log("\nONE CONTINUOUS FIELD — the leg never restarts");
   var best = FL.generateCandidates(cfg)[0];
   var k = notchAt(cfg);
   ok("the run changes partway down the field", k > 0, String(k));
+  // Runs are post-gap: a 240" measured band lays 239.5" between its walls.
+  var mainRun = 240 - 2*BASE.gap, legRun = 120 - 2*BASE.gap;
   ok("rows above the notch carry the main run",
-     cfg.rowRuns[k-1].runIn === 240 && cfg.rowRuns[0].runIn === 240);
+     near(cfg.rowRuns[k-1].runIn, mainRun) && near(cfg.rowRuns[0].runIn, mainRun),
+     cfg.rowRuns[0].runIn+"/"+cfg.rowRuns[k-1].runIn);
   ok("rows below it carry the leg run",
-     cfg.rowRuns[k].runIn === 120 && cfg.rowRuns[cfg.rowRuns.length-1].runIn === 120);
+     near(cfg.rowRuns[k].runIn, legRun) && near(cfg.rowRuns[cfg.rowRuns.length-1].runIn, legRun),
+     String(cfg.rowRuns[k].runIn));
 
   // The whole requirement, as a number: no restart at the corner.
   ok("the first leg row does NOT start at a full plank",
@@ -143,7 +150,7 @@ console.log("\nTHE SEAM SWEEP — 256 L geometries, notch rows asserted explicit
     var cfg = FL.bandedCfg(bands(d0,m,d1,l), BASE);
     var best = FL.generateCandidates(cfg)[0];
     if (FL.audit(best.rows, cfg) > 0) violations++;
-    if (cfg.plan && cfg.plan.ripCount > 0) withRip++;
+    if (cfg.plan && cfg.plan.scribeCount > 0) withRip++;
     // EXPLICIT on the rows that span the notch line — the 5% the old code broke.
     var rr = cfg.rowRuns || [];
     for (var i=1;i<rr.length;i++){
@@ -160,7 +167,10 @@ console.log("\nTHE SEAM SWEEP — 256 L geometries, notch rows asserted explicit
   });});});});
 
   ok("swept "+total+" L geometries", total === 256, String(total));
-  ok("...and every one of them actually produced a corner rip", withRip === total,
+  // The coverage guard: if this ever drops, the sweep is green on geometries
+  // that never meet a corner and is proving nothing. An early run had all its
+  // depths on the plank grid and reported 0 — passing, and testing none of it.
+  ok("...and every one of them actually crossed a corner", withRip === total,
      withRip+" of "+total);
   ok("zero audit violations across the sweep", violations === 0, String(violations));
   ok("ZERO notch-spanning seam breaks (this was 5%)", notchBreaks === 0, String(notchBreaks));
@@ -238,72 +248,79 @@ console.log("\nONE OFFCUT POOL — a piece cut in the main run starts a leg row"
 })();
 
 // ===========================================================================
-console.log("\nTHE CORNER RIP");
+console.log("\nTHE CORNER — the board runs through and is scribed");
 // ===========================================================================
 (function(){
-  // Notch on a course line: nothing to rip.
-  var clean = FL.bandRowPlan(bands(45,240,45,120), BASE.plankWid, BASE.minRip);
-  ok("a notch that lands on a course produces no rip", clean.ripCount === 0);
-  ok("...and every row is a full plank wide",
-     clean.widths.every(function(w){ return near(w, BASE.plankWid); }));
+  /* A course that meets the corner mid-width is NOT cut lengthwise into two
+     narrower courses. It is laid whole, spanning the furthest wall it reaches,
+     and the overhang is scribed to the corner. That is what a floor layer does,
+     and it keeps the field in full-width courses instead of running a seam along
+     the notch line.
 
-  // Notch mid-row: the board at the inside corner is ripped, and the two halves
-  // add back up to the row they came from.
-  var rip = FL.bandRowPlan(bands(30,240,54,120), BASE.plankWid, BASE.minRip);
-  ok("a notch inside a row rips it", rip.ripCount === 2, String(rip.ripCount));
-  var ripped = rip.rows.filter(function(r){ return r.rip; });
-  ok("...into exactly two strips", ripped.length === 2);
-  ok("...whose widths sum to one course", near(ripped[0].width + ripped[1].width, BASE.plankWid),
-     (ripped[0].width+ripped[1].width).toFixed(3));
-  ok("...one each side of the corner",
-     Math.abs(ripped[0].runIn - ripped[1].runIn) > 0.001);
-  ok("the rip is reported like an edge rip — a row narrower than a plank",
-     ripped.every(function(r){ return r.width < BASE.plankWid; }));
-  ok("total depth is preserved by the split",
-     near(rip.widths.reduce(function(a,b){return a+b;},0), 84), String(rip.totalDepth));
+     Splitting was the first model and it was wrong twice: it invented a course
+     boundary the room does not have, and when the notch fell near a course line
+     it produced a strip below the rip floor — 0.125" at worst, on 69% of swept
+     geometries. Running the board through removes that by construction. */
+  var clean = FL.bandRowPlan(bands(45,240,45,120), BASE.plankWid, BASE.minRip);
+  ok("a notch on a course line needs no scribe", clean.scribeCount === 0);
+  ok("...and every interior course is a full plank",
+     clean.widths.slice(1,-1).every(function(w){ return near(w, BASE.plankWid); }));
+
+  var sc = FL.bandRowPlan(bands(30,240,54,120), BASE.plankWid, BASE.minRip);
+  ok("a notch mid-course scribes exactly one course", sc.scribeCount === 1,
+     String(sc.scribeCount));
+  var row = sc.rows.filter(function(r){ return r.scribe; })[0];
+  ok("...the course is laid WHOLE, not split", near(row.width, BASE.plankWid),
+     String(row.width));
+  ok("...it spans to the furthest wall it meets", near(row.runIn, 240), String(row.runIn));
+  ok("...whole to the corner at 120\"", near(row.scribe.keepFrom, 120));
+  ok("...scribed from there out to 240\"", near(row.scribe.keepTo, 240));
+  ok("...and the scribed piece is 6\" deep", near(row.scribe.depth, 6),
+     String(row.scribe.depth));
+
+  // The row division is now the rectangle's, so the only rips are the edge rips.
+  var rect = rectCfg(240, 84);
+  ok("the course division matches a plain 84\"-deep room",
+     JSON.stringify(sc.widths) === JSON.stringify(rect.widths),
+     JSON.stringify(sc.widths));
+  ok("total depth is preserved", near(sc.widths.reduce(function(a,b){return a+b;},0), 84));
 })();
 
 // ===========================================================================
-console.log("\nSLIVERS — reported, never silently laid  [OPEN QUESTION]");
+console.log("\nSLIVERS ARE NOW IMPOSSIBLE, NOT MERELY RARE");
 // ===========================================================================
 (function(){
-  /* A corner rip is only layable if it clears the same minRip floor the engine
-     already enforces at the walls. When the notch falls a fraction inside a row
-     it does not. Measured across 5,776 notch depths: 37% of corner rips came out
-     under 2", the worst 0.125". A board that thin cannot be cut or held down.
-
-     Resolving it is a TRADE decision with three defensible answers — nudge the
-     starting rip so the notch lands on a course, let the neighbouring board run
-     through and scribe it, or absorb the difference across the two rows — and
-     each changes the floor the customer gets. So the engine measures and
-     reports; it does not choose. This is why the Stage 3 dispatch has NOT been
-     flipped. */
-  // 32.125" was FOUND, not guessed: an earlier draft picked 30.25" on the
-  // assumption that any off-grid notch slivers, and it does not — the row grid
-  // shifts with the edge rip, so 30.25" splits into a comfortable 6.125"/2.875".
-  // The failure depends on where the notch falls relative to the COURSES, not on
-  // whether the depth is round.
-  var thin = FL.bandRowPlan(bands(32.125,240,54,120), BASE.plankWid, BASE.minRip);
-  ok("a notch that lands 1.94\" from a course makes a sliver", thin.slivers > 0,
-     "narrowest "+thin.narrowestRip+'"');
-  ok("...and the plan says so rather than emitting it quietly", thin.layable === false);
-
-  var fine = FL.bandRowPlan(bands(30,240,54,120), BASE.plankWid, BASE.minRip);
-  ok("a rip at or above the floor is layable", fine.layable === true && fine.slivers === 0);
-
-  // How often, across the same 256 the seam sweep uses.
+  /* The measurement that parked this stage's flip: 37% of corner rips came out
+     under the 2" floor, worst 0.125", on 176 of 256 geometries. Every one of
+     those came from splitting a course. Nothing splits a course any more, so the
+     failure cannot occur — and this asserts that structurally, across the same
+     sweep, rather than trusting the reasoning. */
   var MAIN=[156,204,240,287.5], LEG=[71.5,108,143.25,180],
       D0=[40,53.5,76.25,100],   D1=[44,61.5,88.75,112];
-  var n=0, bad=0, worst=Infinity;
+  var n=0, unlayable=0, scribed=0, narrowest=Infinity, offGrid=0;
   MAIN.forEach(function(m){ LEG.forEach(function(l){ D0.forEach(function(d0){ D1.forEach(function(d1){
     n++;
     var p = FL.bandRowPlan(bands(d0,m,d1,l), BASE.plankWid, BASE.minRip);
-    if (!p.layable) bad++;
-    if (isFinite(p.narrowestRip)) worst = Math.min(worst, p.narrowestRip);
+    if (!p.layable) unlayable++;
+    if (p.scribeCount > 0) scribed++;
+    // no interior course may fall below the rip floor
+    p.widths.slice(1,-1).forEach(function(w){ if (w < narrowest) narrowest = w; });
+    // and the edge rips must still clear it, as in any rectangle
+    if (p.widths[0] < BASE.minRip - 0.001) offGrid++;
   });});});});
-  ok("the sweep measures how often it bites ("+bad+" of "+n+", narrowest "+worst+'")',
-     n === 256);
-  ok("every geometry reports layability either way", bad >= 0 && bad <= n);
+  ok("swept "+n+" geometries again under the scribe model", n === 256);
+  ok("every one is layable", unlayable === 0, String(unlayable));
+  ok("every one needed a scribe (so the path is exercised)", scribed === n,
+     scribed+" of "+n);
+  ok("no interior course is below a full plank", near(narrowest, BASE.plankWid),
+     narrowest+'"');
+  ok("edge rips still clear the rip floor", offGrid === 0, String(offGrid));
+  ok("the plan reports no rips at all — nothing is split", 
+     FL.bandRowPlan(bands(32.125,240,54,120), BASE.plankWid, BASE.minRip).ripCount === 0);
+  // The geometry that used to sliver at 1.94" now simply scribes.
+  var was = FL.bandRowPlan(bands(32.125,240,54,120), BASE.plankWid, BASE.minRip);
+  ok("the 1.94\" sliver case is now a clean scribe",
+     was.layable === true && was.slivers === 0 && was.scribeCount === 1);
 })();
 
 // run_tests.sh greps for a line matching ^N passed, M failed — keep this format.
