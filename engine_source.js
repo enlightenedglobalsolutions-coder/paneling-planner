@@ -58,7 +58,14 @@ var ENGINES = {
     exports: ['joints', 'clearance', 'tailLen', 'rowPieces', 'legalStarts',
               'pickFresh', 'buildLayout', 'audit', 'wasteOf', 'uniqueStarts',
               'shortestPeriod', 'generateCandidates', 'boxPlan', 'isLocked',
-              'suggestOffset', 'bandRowPlan', 'bandedCfg', 'clearanceAbs', 'absJoints']
+              'suggestOffset', 'bandRowPlan', 'bandedCfg', 'clearanceAbs', 'absJoints',
+              'phaseStep', 'stepMags', 'longestSimilarRun', 'eyeOffences', 'eyeTol',
+              'rowEnd', 'shortEnds'],
+    accessors: {
+      getEyeRun:  'function(){ return EYE_RUN; }',
+      getEndMin:  'function(){ return END_MIN; }',
+      getEndPref: 'function(){ return END_PREF; }'
+    }
   },
 
   // Base paneling engine. NOT contiguous: assignStock / computeTakeoff /

@@ -313,6 +313,66 @@ dishonest failure this app is written against. Pinning lands in Stage 5; `area.p
 paneling-shaped (`{scenarioFt, boards}`) and `saveCurrentArea` rebuilds from a 16-name allowlist
 that would erase any new field on the next re-measure.
 
+### The eye rule — no pattern the eye can follow
+The seam field must show no run the eye can track. **Three or more consecutive steps of similar
+magnitude is a pattern, and three already fails.** Magnitude only — direction is ignored, because an
+equal-step zigzag (left, right, left by similar amounts) tracks as readily as a diagonal.
+
+A *step* is `phaseStep()`: the difference between two row starts, wrapped to `(-P/2, P/2]`. Wrapping
+matters — joints repeat every plank, so 50″ → 10″ is a 20″ step, not 40″.
+
+**Tolerance is proportional to the plank**, not a magic number: the joint spacing *is* the plank
+length, so what reads as "the same step" scales with it. `eyeTol(P) = max(1.5, P × 0.05)` — 3.0″ at
+60″, 2.4″ at 48″. Chosen by measurement: at this tolerance several existing kitchen candidates
+already passed, so the rule is achievable, while the photographed staircase (spread 4.5″ over six
+courses) is caught.
+
+**`eyeOffences()` is SEVERITY-weighted**, and this matters. A first version counted runs, so a
+marginal three-course wobble and a fourteen-course staircase both scored 1 and the ranking had no
+reason to prefer the wobble. Each run now contributes `length − 2`.
+
+**Why the engine drew the staircase:** it maximised clearance on every row, and the largest
+achievable clearance is nearly the same number every time, so the steps clustered. The fix is in
+both places — `pickFresh` rejects a start that would make a third similar step (falling back rather
+than dead-ending), and the ranking prefers fewer offences. Rejection alone cannot help a room with
+no alternative; ranking alone leaves the generator producing offences.
+
+### Row ends — 2″ is a rule, 6″ is a preference
+The last cut in a row is never under **2″** (`END_MIN`, a legality filter in `legalStarts`), and
+**6″+** is preferred (`END_PREF`, a small score bonus that breaks ties without steering the layout).
+Note `MIN_FRESH = 6` already forbade *starting* a row under 6″ — the same instinct at the other end
+of the row, which had no counterpart until now.
+
+The rule reaches **row 1**, whose start was hardcoded to a full plank: a run that made the first
+course end on a chip had no way to fix itself. It now steps back until the end is layable.
+
+**The two rules are solved together, never in sequence.** Forcing a row's end moves that row's
+joints, which changes its step, which is what the eye rule judges — fix them one after the other and
+the second undoes the first. So the **end rule filters what is legal** and the **eye rule chooses
+among the survivors**. Both are re-checked in the offcut-reuse branch, which bypasses `pickFresh`
+entirely.
+
+**Ranking order:** `endHard → violations → eye → relaxed → period → waste → unique → endSoft`. An
+unlayable end beats everything; then the seam rule; then the eye. `endSoft` ranks last so a
+comfortable last cut cannot buy a materially worse floor.
+
+### KNOWN: the seam rule and the eye rule conflict in tight rooms
+Measured across 3,780 rectangle rooms: **no row anywhere ends under 2″** (shortest exactly 2.00″),
+and **68.8% are fully clean** of followable runs. The residual **25.6%** is not a generator failure —
+verified, the ranking takes the least-patterned option **within its tier** in every case. It is a
+genuine conflict: in a tightly-constrained room the only layouts without a step carry **seam
+violations**, and joints too close together is a structural defect where a visible step is an ugly
+one. The engine will not trade the first for the second.
+
+Example: a 90″ × 67″ room at a 48″ plank has **one** legal start per row, so every seam-legal layout
+steps by exactly 16″. Its no-pattern alternative carries eight seam violations.
+
+**The app already surfaces the remedy for most of these** — `isLocked()` flags 68% of them and
+`suggestOffset()` offers a smaller stagger for 100%, which clears the staircase in 59%. The 32% that
+step without being flagged is an open gap: `isLocked` requires `period <= 4` and so misses
+staircases that do not repeat exactly. Whether the lock warning should fire on the eye score instead
+is a parked question — it changes user-facing messaging.
+
 ### The L field engine — one continuous field, and the corner is SCRIBED
 Two-band L areas route to the engine. `stgAreaField()` counts **bands**, never `kind`
 (`kind` is `'rect'` at `bands.length <= 1`, i.e. for zero bands too). Two bands of the same run
@@ -415,7 +475,7 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 18 suites, 959 assertions.
+if every suite passes, so it is safe in front of a deploy. 19 suites, 1038 assertions.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way

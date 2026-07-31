@@ -180,8 +180,8 @@ console.log("\nTHE HARD CHECKPOINT — area and Quick calc are ONE code path");
 
   // The three demo rooms must land on their existing goldens through the area
   // path too — if the join changed what the engine produces, this is where it shows.
-  var GOLD = { '156x132':'f2b63670853b129c', '240x192':'87381dd7b2d49096',
-               '288x48':'f24aeef20b8b0439' };
+  var GOLD = { '156x132':'4feb4d8193f9986c', '240x192':'a2a234d87999ff3f',
+               '288x48':'309ec2a3ee61e15a' };
   Object.keys(GOLD).forEach(function(k){
     var d = k.split('x').map(Number);
     var cfg = cfgFrom(J.parseMeas(J.stgInchField(d[0]),"ft"), J.parseMeas(J.stgInchField(d[1]),"ft"));

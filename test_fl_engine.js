@@ -46,10 +46,16 @@ function mkCfg(o){
 }
 function starts(rows){ return rows.map(function(r){ return r.start; }); }
 
-// the engine's own ranking comparator (index.html:2125-2131), reproduced so the
-// suite can MEASURE tie exposure rather than assume it
-function rank(a,b){ return (a.violations-b.violations)||(a.relaxed-b.relaxed)||
-  (b.period-a.period)||(a.waste-b.waste)||(b.unique-a.unique); }
+/* The engine's own ranking comparator, reproduced so the suite can MEASURE tie
+   exposure rather than assume it. It MUST track the engine: when the eye rule
+   and the row-end floor were added as ranking keys, this copy went stale and the
+   suite reported the candidates as out of order — the assertion caught its own
+   duplication, which is the argument for keeping that assertion.
+
+   Order: an unlayable end beats everything, then the seam rule, then the eye. */
+function rank(a,b){ return (a.endHard-b.endHard)||(a.violations-b.violations)||
+  (a.eye-b.eye)||(a.relaxed-b.relaxed)||
+  (b.period-a.period)||(a.waste-b.waste)||(b.unique-a.unique)||(a.endSoft-b.endSoft); }
 function tieCount(cands){
   var t=0;
   for(var x=0;x<cands.length;x++) for(var y=x+1;y<cands.length;y++) if(rank(cands[x],cands[y])===0) t++;
@@ -65,14 +71,25 @@ function tieCount(cands){
 //  The suite re-measures ties at run time and refuses to order-pin if any
 //  appear, so it cannot silently become brittle later.
 // ---------------------------------------------------------------------------
+/* RE-GOLDENED 2026-07-31 — the eye rule and row-end minimums.
+   Every `starts` and `sha` below moved, on purpose. The previous layouts
+   contained the offence: the kitchen's steps ran 20, 17.5, 18, 19.5, 20, 22
+   across rows 6-11 — six courses of near-identical step, the staircase Edwin
+   photographed — and row 14 ended on a 1" cut. Both are now rule violations, so
+   the layouts had to change; a green suite against the old goldens would have
+   been a suite defending the defect.
+   `eye` / `endHard` / `endSoft` are the new pins. eye is SEVERITY-weighted: each
+   run of 3+ similar-magnitude steps contributes (length - 2), so a marginal
+   three-course wobble scores 1 and a fourteen-course staircase scores 12; endHard counts rows ending under 2"; endSoft under 6". */
 var FIXTURES = [
   { key:'kitchen', why:"the audit's sample room — demo and test share one source of truth",
     roomRunIn:156, roomAcrossIn:132, gap:0.25, plankLen:60, plankWid:9,
     minOff:16, minReuse:20, minRip:2, perBox:8, rotate:4,
     nRows:15, edgeRip:7.25, cands:16, ties:0,
-    starts:[60,32.5,16,53,35.5,14,54,36.5,18.5,59,39,17,56.5,34.5,14.5],
-    metrics:{seed:88,guard:true,violations:0,relaxed:0,waste:296.5,unique:15,period:15},
-    box:{planks:50,boxes:7,perBox:8}, sha:'f2b63670853b129c', suggest:15, locked:false },
+    starts:[60,32.5,16.5,55,35.5,12.5,52.5,33,8.5,49.5,27,7,51,28.5,11],
+    metrics:{seed:250,guard:true,violations:0,relaxed:0,waste:297,unique:15,period:15},
+    eye:0, endHard:0, endSoft:2,
+    box:{planks:52,boxes:7,perBox:8}, sha:'4feb4d8193f9986c', suggest:15, locked:false },
 
   // The other two demo rooms. Added as goldens BEFORE they appeared in the UI,
   // so a room card's numbers and its test come from one source rather than being
@@ -83,17 +100,19 @@ var FIXTURES = [
     roomRunIn:240, roomAcrossIn:192, gap:0.25, plankLen:60, plankWid:9,
     minOff:16, minReuse:20, minRip:2, perBox:8, rotate:4,
     nRows:22, edgeRip:5.75, cands:16, ties:0,
-    starts:[60,32,16,53.5,35,13.5,56,36,18,59.5,41.5,20,57.5,39.5,16.5,56,37,19.5,57,40,17,59.5],
-    metrics:{seed:250,guard:false,violations:0,relaxed:0,waste:407.5,unique:20,period:22},
-    box:{planks:104,boxes:13,perBox:8}, sha:'87381dd7b2d49096', suggest:15, locked:false },
+    starts:[60,32,16,53.5,37.5,19,59.5,35.5,16.5,54.5,38,18.5,57,41,17.5,59.5,42,19.5,60,41,18.5,57],
+    metrics:{seed:1234,guard:true,violations:0,relaxed:0,waste:492.5,unique:17,period:22},
+    eye:0, endHard:0, endSoft:3,
+    box:{planks:104,boxes:13,perBox:8}, sha:'a2a234d87999ff3f', suggest:15, locked:false },
 
   { key:'hallway', why:"demo room 3 — 24'x4', 6:1, the fit-to-screen proof case",
     roomRunIn:288, roomAcrossIn:48, gap:0.25, plankLen:60, plankWid:9,
     minOff:16, minReuse:20, minRip:2, perBox:8, rotate:4,
-    nRows:6, edgeRip:5.75, cands:16, ties:0,
+    nRows:6, edgeRip:5.75, cands:16, ties:1,
     starts:[60,26,44,6.5,24.5,41],
     metrics:{seed:250,guard:true,violations:0,relaxed:0,waste:102,unique:6,period:6},
-    box:{planks:34,boxes:5,perBox:8}, sha:'f24aeef20b8b0439', suggest:15, locked:false },
+    eye:0, endHard:0, endSoft:1,
+    box:{planks:34,boxes:5,perBox:8}, sha:'309ec2a3ee61e15a', suggest:15, locked:false },
 
   { key:'lock', why:"the geometry lock — legal on every rule and still a staircase",
     roomRunIn:240, roomAcrossIn:132, gap:0, plankLen:48, plankWid:9,
@@ -101,31 +120,35 @@ var FIXTURES = [
     nRows:15, edgeRip:7.5, cands:10, ties:1,
     starts:[48,32,16,48,32,16,48,32,16,48,32,16,48,32,16],
     metrics:{seed:3,guard:true,violations:0,relaxed:0,waste:240,unique:3,period:3},
-    box:{planks:85,boxes:11,perBox:8}, sha:'78406620e685e7c3', suggest:15, locked:true },
+    eye:12, endHard:0, endSoft:0,
+    box:{planks:85,boxes:11,perBox:8}, sha:'9ca43fdd41c55107', suggest:15, locked:true },
 
   { key:'tight', why:"over-constrained — exercises the relax loop and the minimise-the-violation fallback",
     roomRunIn:300, roomAcrossIn:216, gap:0, plankLen:36, plankWid:9,
     minOff:24, minReuse:20, minRip:2, perBox:8, rotate:4,
-    nRows:24, edgeRip:9, cands:8, ties:0,
-    starts:[36,18,9,31.5,20.5,8.5,32.5,20.5,8.5,32.5,20.5,8.5,32.5,20.5,8.5,32.5,20.5,8.5,32.5,20.5,8.5,32.5,20.5,8.5],
-    metrics:{seed:1234,guard:false,violations:45,relaxed:23,waste:371.5,unique:7,period:24},
-    box:{planks:224,boxes:28,perBox:8}, sha:'d84298c10f21c085', suggest:11, locked:false },
+    nRows:24, edgeRip:9, cands:7, ties:0,
+    starts:[36,18,27,6,17,29,6,17,30,6,18,30,6,18,30,6,18,30,6,18,30,6,18,30],
+    metrics:{seed:3,guard:false,violations:45,relaxed:23,waste:444,unique:7,period:24},
+    eye:14, endHard:0, endSoft:0,
+    box:{planks:223,boxes:28,perBox:8}, sha:'be935977b8192f25', suggest:11, locked:false },
 
   { key:'tworow', why:"two-row room — the nRows===2 width branch",
     roomRunIn:156, roomAcrossIn:18, gap:0.25, plankLen:60, plankWid:9,
     minOff:16, minReuse:20, minRip:2, perBox:8, rotate:4,
-    nRows:2, edgeRip:8.75, cands:12, ties:0,
-    starts:[60,35],
-    metrics:{seed:17,guard:true,violations:0,relaxed:0,waste:36,unique:2,period:2},
-    box:{planks:7,boxes:1,perBox:8}, sha:'9aad031a8e0d3469', suggest:15, locked:false },
+    nRows:2, edgeRip:8.75, cands:13, ties:0,
+    starts:[60,33],
+    metrics:{seed:3,guard:true,violations:0,relaxed:0,waste:38,unique:2,period:2},
+    eye:0, endHard:0, endSoft:1,
+    box:{planks:7,boxes:1,perBox:8}, sha:'ddb8b9279bc23a79', suggest:15, locked:false },
 
   { key:'narrow', why:"room narrower than one plank — the nRows<2 clamp",
     roomRunIn:120, roomAcrossIn:7, gap:0, plankLen:48, plankWid:9,
     minOff:12, minReuse:20, minRip:2, perBox:8, rotate:4,
     nRows:2, edgeRip:3.5, cands:7, ties:0,
-    starts:[48,23.5],
-    metrics:{seed:1234,guard:false,violations:0,relaxed:0,waste:24.5,unique:2,period:2},
-    box:{planks:7,boxes:1,perBox:8}, sha:'05b4ddd2427ed19d', suggest:11, locked:false }
+    starts:[48,24],
+    metrics:{seed:1234,guard:false,violations:0,relaxed:0,waste:24,unique:2,period:2},
+    eye:0, endHard:0, endSoft:0,
+    box:{planks:6,boxes:1,perBox:8}, sha:'e88d6bc6dffa4334', suggest:11, locked:false }
 ];
 
 
@@ -175,6 +198,11 @@ FIXTURES.forEach(function(f){
      best.period===f.metrics.period,
      JSON.stringify({v:best.violations,r:best.relaxed,w:best.waste,u:best.unique,p:best.period}));
   ok(f.key+": boxPlan "+f.box.planks+" planks / "+f.box.boxes+" boxes", eq(box,f.box), JSON.stringify(box));
+  ok(f.key+": "+f.eye+" eye offence(s) — runs of 3+ similar steps",
+     best.eye===f.eye, "got "+best.eye);
+  ok(f.key+": no row ends under 2\"", best.endHard===0 && f.endHard===0, "got "+best.endHard);
+  ok(f.key+": "+f.endSoft+" row(s) end under the preferred 6\"",
+     best.endSoft===f.endSoft, "got "+best.endSoft);
   ok(f.key+": isLocked "+f.locked, FL.isLocked(best,cfg)===f.locked);
   ok(f.key+": suggestOffset "+JSON.stringify(f.suggest), eq(FL.suggestOffset(cfg), f.suggest),
      JSON.stringify(FL.suggestOffset(cfg)));
@@ -208,9 +236,10 @@ var L_FIXTURES = [
     runs:[239.5,239.5,239.5,239.5,239.5,119.5,119.5,119.5,119.5,119.5],
     widths:[8.75,9,9,9,9,9,9,9,9,8.75],
     cands:16, ties:0,
-    starts:[60,34,16.5,58,39.5,17.5,59.5,42,22,58],
-    metrics:{seed:3,guard:true,violations:0,relaxed:0,waste:206,unique:9,period:10},
-    box:{planks:37,boxes:5,perBox:8}, sha:'6d0fd0eaaf24faae' },
+    starts:[60,32,16,53.5,37.5,19,59.5,35.5,16.5,54.5],
+    metrics:{seed:1234,guard:true,violations:0,relaxed:0,waste:271,unique:10,period:10},
+    eye:0, endHard:0, endSoft:1,
+    box:{planks:38,boxes:5,perBox:8}, sha:'9ffeb8f2465986b6' },
 
   { key:'lscribe', why:"notch falls mid-course — the board runs through and is scribed",
     bands:[{depthIn:30,runIn:240,runStartIn:0},{depthIn:54,runIn:120,runStartIn:0}],
@@ -219,9 +248,10 @@ var L_FIXTURES = [
     widths:[5.75,9,9,9,9,9,9,9,9,5.75],
     scribe:{ row:4, keepFrom:119.75, keepTo:239.75, depth:6 },
     cands:16, ties:0,
-    starts:[60,34,16.5,58,39.5,17.5,59.5,42,22,58],
-    metrics:{seed:3,guard:true,violations:0,relaxed:0,waste:206,unique:9,period:10},
-    box:{planks:35,boxes:5,perBox:8}, sha:'f21f6bbaf2966408' }
+    starts:[60,32,16,53.5,37.5,19,59.5,35.5,16.5,54.5],
+    metrics:{seed:1234,guard:true,violations:0,relaxed:0,waste:271,unique:10,period:10},
+    eye:0, endHard:0, endSoft:1,
+    box:{planks:36,boxes:5,perBox:8}, sha:'be110f117abb37d1' }
 ];
 function lfx(key){
   var f = L_FIXTURES.filter(function(x){ return x.key === key; })[0];
@@ -271,6 +301,10 @@ L_FIXTURES.forEach(function(f){
      best.period===f.metrics.period,
      JSON.stringify({v:best.violations,r:best.relaxed,w:best.waste,u:best.unique,p:best.period}));
   ok(f.key+": boxPlan "+f.box.planks+" planks", eq(box,f.box), JSON.stringify(box));
+  ok(f.key+": "+f.eye+" eye offence(s) across the corner", best.eye===f.eye, "got "+best.eye);
+  ok(f.key+": no row ends under 2\"", best.endHard===0, "got "+best.endHard);
+  ok(f.key+": "+f.endSoft+" row(s) end under the preferred 6\"",
+     best.endSoft===f.endSoft, "got "+best.endSoft);
   ok(f.key+": full-structure digest "+f.sha, E.digest(cands)===f.sha, E.digest(cands));
 
   // The continuity requirement, in numbers: the first row of the SECOND band

@@ -87,9 +87,9 @@ console.log("\nHARD CHECKPOINT — an L with a zero notch IS a rectangle");
   ok(d[0]+"x"+d[1]+": ...and it carries no per-row runs at all", !band.rowRuns);
 });
 // The three demo rooms specifically: a zero-notch L must reproduce their goldens.
-[['156x132','f2b63670853b129c',156,132],
- ['240x192','87381dd7b2d49096',240,192],
- ['288x48', 'f24aeef20b8b0439',288,48]].forEach(function(g){
+[['156x132','4feb4d8193f9986c',156,132],
+ ['240x192','a2a234d87999ff3f',240,192],
+ ['288x48', '309ec2a3ee61e15a',288,48]].forEach(function(g){
   var band = FL.bandedCfg(bands(g[3]*0.5, g[2], g[3]*0.5, g[2]), BASE);
   ok("a zero-notch L reproduces the "+g[0]+" golden exactly",
      E.digest(FL.generateCandidates(band))===g[1]);

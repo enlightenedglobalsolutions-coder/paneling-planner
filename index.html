@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.27-2119';</script>
+<script>window.EGS_VERSION = '2026.07.31-0924';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -2019,9 +2019,9 @@ function stgHasJobs(){
    --------------------------------------------------------------------------- */
 var SAMPLE_ROOMS = [
   { key:"kitchen",   name:"Kitchen",    len:"13'-0", wid:"11'-0",
-    rows:15, planks:50,  boxes:7,  deck:5 },
+    rows:15, planks:52,  boxes:7,  deck:4 },
   { key:"greatroom", name:"Great room", len:"20'-0", wid:"16'-0",
-    rows:22, planks:104, boxes:13, deck:5 },
+    rows:22, planks:104, boxes:13, deck:4 },
   { key:"hallway",   name:"Hallway",    len:"24'-0", wid:"4'-0",
     rows:6,  planks:34,  boxes:5,  deck:1 }
 ];
@@ -2267,6 +2267,100 @@ var FL = (function(){
   var SEEDS = [3,17,42,88,101,250,777,1234];
   var MIN_FRESH = 6;     // never start a row with a sliver
 
+  /* ---- the eye rule, and row ends ----------------------------------------
+     THE EYE RULE. A floor is wrong when the seam field shows a pattern the eye
+     can follow. That is not only a same-direction diagonal: an equal-step zigzag
+     — left, right, left by similar amounts — tracks just as easily. So the rule
+     is on step MAGNITUDE and ignores direction entirely.
+
+     A "step" is how far a row's joints move against the row above, measured as
+     the signed phase difference wrapped into (-P/2, P/2]. Three consecutive
+     steps of similar magnitude is already a pattern; Edwin's ceiling is "usually
+     two or three", so THREE FAILS.
+
+     Tolerance is proportional to the plank, not a magic number: the joint
+     spacing IS the plank length, so what counts as "the same step to the eye"
+     scales with it. 5% of the plank, floored so very short planks stay sane —
+     3.0" at a 60" plank, 2.4" at 48", 1.5" at anything under 30".
+
+     WHY THE ENGINE PRODUCED THIS. It maximised clearance on every row, and the
+     largest achievable clearance is nearly the same number every time — so the
+     steps clustered and drew a staircase. The generator now rejects a start that
+     would make a third similar step, and the ranking prefers layouts without
+     one; the fix is both, because rejection alone cannot help a room with no
+     alternative, and ranking alone leaves the generator producing offences.
+
+     ROW ENDS. The last cut in a row is never under 2", and 6" or more is
+     preferred. Note MIN_FRESH above already forbids STARTING a row under 6" —
+     the same instinct applied to the other end of the row, and it had no
+     counterpart until now.
+
+     The two rules are solved TOGETHER, not in sequence: forcing a row's end
+     length moves that row's joints, which changes its step, which is what the
+     eye rule judges. Fixing them one after the other would have the second undo
+     the first. So the end rule filters what is legal, and the eye rule chooses
+     among what survives. */
+  var EYE_RUN  = 3;      // this many similar steps in a row is a visible pattern
+  var END_MIN  = 2;      // hard: the last cut in a row is never shorter
+  var END_PREF = 6;      // soft: preferred shortest last cut
+  function eyeTol(P){ return Math.max(1.5, P * 0.05); }
+
+  // Signed phase difference between two row starts, wrapped to (-P/2, P/2].
+  function phaseStep(a, b, P){
+    var d = (b - a) % P;
+    if (d > P/2) d -= P;
+    if (d <= -P/2) d += P;
+    return d;
+  }
+  function stepMags(rows, P){
+    var out = [];
+    for (var i=1;i<rows.length;i++) out.push(Math.abs(phaseStep(rows[i-1].start, rows[i].start, P)));
+    return out;
+  }
+  // Longest run of consecutive steps whose magnitudes all sit within tol.
+  function longestSimilarRun(mags, tol){
+    var best = 0;
+    for (var a=0;a<mags.length;a++){
+      var mn = mags[a], mx = mags[a];
+      for (var b=a;b<mags.length;b++){
+        if (mags[b] < mn) mn = mags[b];
+        if (mags[b] > mx) mx = mags[b];
+        if (mx - mn <= tol){ if (b-a+1 > best) best = b-a+1; }
+        else break;
+      }
+    }
+    return best;
+  }
+  /* How badly the field steps — WEIGHTED BY RUN LENGTH, not a count of runs.
+
+     Counting runs was the first version and it could not tell a marginal
+     three-course wobble from a fourteen-course staircase: both scored 1, so the
+     ranking had no reason to prefer the wobble. Measured across 3,780 rooms,
+     26% still came out with a run of six or more because of exactly that
+     blindness. Each maximal run now contributes (length - EYE_RUN + 1), so a
+     3-run scores 1, a 6-run scores 4, a 14-run scores 12, and zero still means
+     clean. The ranking can finally see severity. */
+  function eyeOffences(rows, P){
+    var mags = stepMags(rows, P), tol = eyeTol(P), score = 0, i = 0;
+    while (i <= mags.length - EYE_RUN){
+      var mn = mags[i], mx = mags[i], j = i;
+      while (j < mags.length){
+        if (mags[j] < mn) mn = mags[j];
+        if (mags[j] > mx) mx = mags[j];
+        if (mx - mn > tol) break;
+        j++;
+      }
+      if (j - i >= EYE_RUN){ score += (j - i) - EYE_RUN + 1; i = j; } else i++;
+    }
+    return score;
+  }
+  function rowEnd(r){ return r.pieces[r.pieces.length-1]; }
+  function shortEnds(rows, limit){
+    var n = 0;
+    rows.forEach(function(r){ if (rowEnd(r) < limit - 0.001) n++; });
+    return n;
+  }
+
   // ---------- geometry ----------
   // A row starting with a piece of length s has end-joints at s, s+P, s+2P ...
   function joints(s, runIn, P){
@@ -2358,14 +2452,21 @@ var FL = (function(){
       var dB = clearanceAbs(s, x, backJ, runIn, P);
       if (dA < minOff || dB < minOff) continue;
       if (guard && bestFutureClearance(s, P) < minOff) continue;
-      out.push({ s:s, score: Math.min(dA, dB) });
+      // HARD: a row never ends on a cut under END_MIN. This is a legality
+      // filter, not a preference — a 1" tail is not a board, it is a chip.
+      var end = tailLen(s, runIn, P);
+      if (end < END_MIN - 0.001) continue;
+      // SOFT: prefer a comfortable last cut. Small next to the clearance score
+      // so it breaks ties rather than steering the layout.
+      var bonus = (end >= END_PREF - 0.001) ? 1.5 : 0;
+      out.push({ s:s, score: Math.min(dA, dB) + bonus, end:end });
     }
     return out;
   }
 
   // Pick a fresh start. Relaxes the offset toward plank width only if nothing
   // is legal — and reports it, rather than silently accepting a violation.
-  function pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard, recent, xStart){
+  function pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard, recent, xStart, prevStart, lastSteps){
     var x = xStart || 0;
     var cands = legalStarts(prevJ, backJ, minOff, runIn, P, guard, x);
     if (!cands.length && guard) cands = legalStarts(prevJ, backJ, minOff, runIn, P, false, x);
@@ -2375,6 +2476,21 @@ var FL = (function(){
       });
       if (novel.length) cands = novel;
     }
+    /* THE EYE RULE, applied where the choice is made. If the last two steps were
+       similar to each other, a third similar step completes a pattern — so drop
+       those candidates. Fallback is deliberate: a narrow room may have nothing
+       else, and laying the least-patterned option beats dead-ending. */
+    if (lastSteps && lastSteps.length >= EYE_RUN - 1 && prevStart != null){
+      var tol = eyeTol(P);
+      var recentMags = lastSteps.slice(-(EYE_RUN-1));
+      var open = cands.filter(function(c){
+        var m = Math.abs(phaseStep(prevStart, c.s, P));
+        var mn = m, mx = m;
+        recentMags.forEach(function(v){ if (v<mn) mn=v; if (v>mx) mx=v; });
+        return (mx - mn) > tol;
+      });
+      if (open.length) cands = open;
+    }
     var relaxed = false, eff = minOff;
     while (!cands.length && eff > W){
       eff = Math.max(W, eff - 1);
@@ -2382,13 +2498,18 @@ var FL = (function(){
       relaxed = true;
     }
     if (!cands.length){
-      // Truly over-constrained. Minimise the violation instead of pretending.
-      var best=null;
+      /* Truly over-constrained. Minimise the violation instead of pretending —
+         but STILL never end a row under END_MIN: a short last cut is not a
+         degraded floor, it is an unlayable one. The seam rule bends here; the
+         end rule does not. */
+      var best=null, bestAny=null;
       for (var s=MIN_FRESH; s<=P+0.001; s+=STEP){
         var sc = Math.min(clearanceAbs(s,x,prevJ,runIn,P), clearanceAbs(s,x,backJ,runIn,P));
+        if (!bestAny || sc > bestAny.score) bestAny = { s:s, score:sc };
+        if (tailLen(s, runIn, P) < END_MIN - 0.001) continue;
         if (!best || sc > best.score) best = { s:s, score:sc };
       }
-      return { start: best.s, relaxed: true };
+      return { start: (best || bestAny).s, relaxed: true };
     }
     // Randomise among the near-best, not the whole legal set — maximise distance,
     // then take genuine randomness within that band. This is what keeps it from
@@ -2412,8 +2533,18 @@ var FL = (function(){
        with no knowledge of the rows above it, which is precisely how a joint
        could land on top of its neighbour across the corner. */
     var g0 = rowRunAt(cfg, 0);
-    // Row 1: full planks, last one cut to fit.
+    /* Row 1: full planks, last one cut to fit — unless that leaves a chip at the
+       wall. Row 1's start was hardcoded to a full plank, so when the run made
+       tailLen(P) come out under END_MIN there was no way to fix it by choosing a
+       start: the rule has to reach row 1 too, or the very first course is the
+       one that breaks it. Step back a half-inch at a time until the last cut is
+       layable; a start below MIN_FRESH is worse than the short end, so stop. */
     var s1 = P;
+    if (tailLen(s1, g0.runIn, P) < END_MIN - 0.001){
+      for (var t1s = P; t1s >= MIN_FRESH; t1s -= STEP){
+        if (tailLen(t1s, g0.runIn, P) >= END_MIN - 0.001){ s1 = t1s; break; }
+      }
+    }
     /* A rectangle's row carries NO per-run fields. That is not tidiness: the
        goldens hash the whole row structure, so attaching runIn/xStart to every
        row would move every rectangle digest without changing a single layout.
@@ -2431,6 +2562,9 @@ var FL = (function(){
     // Joints are carried in ROOM coordinates so the seam rule means the same
     // thing on both sides of the corner.
     var prevJ = absJoints(s1, g0.runIn, P, g0.xStart), backJ = null;
+    // The step history the eye rule reads. Magnitudes only — direction is
+    // irrelevant, because an equal-step zigzag tracks as easily as a diagonal.
+    var steps = [];
 
     for (var i=2; i<=cfg.nRows; i++){
       var g = rowRunAt(cfg, i-1);
@@ -2453,13 +2587,26 @@ var FL = (function(){
       // which is why the checks below use this row's run, not the donor's.
       if (i !== 3 && bank[i-2] && bank[i-2] >= cfg.minReuse && bank[i-2] <= runIn + 0.001){
         var c = bank[i-2];
-        if (clearanceAbs(c, g.xStart, prevJ, runIn, P) >= minOff &&
+        /* The reuse branch bypasses pickFresh entirely, so BOTH rules have to be
+           checked here as well — otherwise saving a board quietly reintroduces
+           the offence the fresh path just refused. */
+        var reuseEnd = tailLen(c, runIn, P);
+        var reuseOK = reuseEnd >= END_MIN - 0.001;
+        if (reuseOK && steps.length >= EYE_RUN - 1){
+          var tolR = eyeTol(P), mR = Math.abs(phaseStep(rows[i-2].start, c, P));
+          var mnR = mR, mxR = mR;
+          steps.slice(-(EYE_RUN-1)).forEach(function(v){ if(v<mnR)mnR=v; if(v>mxR)mxR=v; });
+          if (mxR - mnR <= tolR) reuseOK = false;
+        }
+        if (reuseOK &&
+            clearanceAbs(c, g.xStart, prevJ, runIn, P) >= minOff &&
             clearanceAbs(c, g.xStart, backJ, runIn, P) >= minOff && !isRepeat(c)){
           start = c; src = "start with row " + (i-2) + "'s offcut";
         }
       }
       if (start === null){
-        var f = pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard && i===2, recent, g.xStart);
+        var f = pickFresh(prevJ, backJ, minOff, runIn, P, W, rnd, guard && i===2, recent, g.xStart,
+                          rows[i-2].start, steps);
         start = f.start; relaxed = f.relaxed;
         src = relaxed ? "fresh plank cut to length — clearance relaxed" : "fresh plank cut to length";
       }
@@ -2470,6 +2617,7 @@ var FL = (function(){
       if (multi){ r.runIn = runIn; r.xStart = g.xStart; }
       rows.push(r);
       bank[i] = r.offcut;
+      steps.push(Math.abs(phaseStep(rows[i-2].start, start, P)));
       backJ = prevJ; prevJ = absJoints(start, runIn, P, g.xStart);
     }
     return rows;
@@ -2536,15 +2684,31 @@ var FL = (function(){
                    relaxed: relaxedRows,
                    waste: wasteOf(rows),
                    unique: uniqueStarts(rows),
-                   period: shortestPeriod(rows) });
+                   period: shortestPeriod(rows),
+                   // The two trade rules, carried on the candidate so the
+                   // ranking can prefer the least-patterned option where a room
+                   // has one — and so an over-constrained room still lays the
+                   // best available instead of dead-ending.
+                   eye: eyeOffences(rows, cfg.plankLen),
+                   endHard: shortEnds(rows, END_MIN),
+                   endSoft: shortEnds(rows, END_PREF) });
       });
     });
+    /* Ranking order, and why. An unlayable end beats everything — a 1" chip at
+       the wall is not a floor. Then the seam rule, then the eye: a legal floor
+       that draws a staircase is the thing Edwin photographed. Only after those
+       do the old cost measures apply. `endSoft` sits below waste deliberately:
+       a comfortable last cut is a preference, and it must not buy itself a
+       materially worse floor. */
     all.sort(function(a,b){
+      if (a.endHard !== b.endHard) return a.endHard - b.endHard;
       if (a.violations !== b.violations) return a.violations - b.violations;
+      if (a.eye !== b.eye) return a.eye - b.eye;
       if (a.relaxed !== b.relaxed) return a.relaxed - b.relaxed;
       if (a.period !== b.period) return b.period - a.period;
       if (a.waste !== b.waste) return a.waste - b.waste;
-      return b.unique - a.unique;
+      if (a.unique !== b.unique) return b.unique - a.unique;
+      return a.endSoft - b.endSoft;
     });
     // De-duplicate identical start sequences so Reshuffle always visibly changes something.
     var seen={}, out=[];
