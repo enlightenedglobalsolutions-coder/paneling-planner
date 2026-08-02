@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.07.31-0924';</script>
+<script>window.EGS_VERSION = '2026.08.02-1524';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -2903,39 +2903,42 @@ var FL = (function(){
   var S = { cfg:null, cands:[], active:0, box:null,
             view:"blueprint", done:{}, fp:null, jumpTo:null, deckSize:0, deckWhy:null };
 
-  /* Sample-room mode. The demo shows a REAL layout from the real engine, but it
-     is a demonstration, not a job you are laying — so row ticking and Reshuffle
-     are off while it is on.
+  /* ---- the three ways a layout gets on screen ------------------------------
 
-     That is not cosmetic. egs-floor-progress is a single global slot, and
-     reshuffle() writes it unconditionally; its "you'll lose your ticks" confirm
-     is gated on hasProgress(), which reads THIS session's S.done — empty in a
-     demo. So a user mid-install who opened the sample out of curiosity and hit
-     Reshuffle would have their real row ticks erased with no warning. */
+     THE MODES ARE MUTUALLY EXCLUSIVE, AND THAT IS NOW LOAD-BEARING. It was not
+     before: while the predicate below was `sampleMode || areaMode`, a flag left
+     set from a previous screen only ever made the next layout MORE read-only,
+     which is a harmless direction to leak in. The containment model has since
+     inverted — area mode is the one mode that WRITES — so a stale areaMode would
+     make Quick calc or the demo write ticks into the last area the user looked
+     at. Every entry point therefore sets both flags, never just its own, and
+     `test_install.js` asserts each one does. */
   var sampleMode = false;
   function inSample(){ return sampleMode; }
 
-  /* Area mode: the layout for ONE area of a real job.
+  /* Area mode: the layout for ONE area of a real job — and the only mode you
+     can install from.
 
-     Behaviourally it is the same contract as the demo — ticking off, Reshuffle
-     on, progress key never written — for the same reason: egs-floor-progress is
-     a single GLOBAL slot with no per-area concept, so writing from here would
-     overwrite whatever the user is actually installing. Pinning a per-area
-     layout is Stage 5's job, and it needs a place to live that is not this key.
-
-     It is a SEPARATE flag from sampleMode rather than a reuse, because the two
-     say different things on screen and leave to different places: a demo exits
-     to Setup or the welcome, an area exits back to its job. Sharing one flag
-     would make the banner lie about one of them. */
+     Until Stage 4 this was read-only alongside the demo, because progress had
+     nowhere to live: egs-floor-progress was a single GLOBAL slot with no
+     per-area concept, so writing from here would have overwritten whatever the
+     user was actually laying. Progress now lives ON the area, in the job store,
+     supplied to this module as AREA.install (see loadProgress/saveProgress), so
+     the reason for the restriction is gone and the restriction goes with it. */
   var areaMode = false;
-  var AREA = null;         // { name, jobName, runIn, acrossIn } while areaMode
+  var AREA = null;         // { name, jobName, runIn, acrossIn, install } while areaMode
   function inArea(){ return areaMode; }
 
-  /* The one predicate every containment guard uses. Both modes are "a layout
-     you are looking at, not one you are laying", and every new guard should ask
-     THIS rather than naming a mode — that is what stops the next mode from
-     having to remember to add itself to four separate checks. */
-  function isReadOnlyLayout(){ return sampleMode || areaMode; }
+  /* THE one predicate every containment guard asks.
+
+     Read it as a sentence: a layout is something you look at unless it is an
+     area of a job, in which case it is a floor you are laying. An install
+     belongs to a floor; a demo is not a floor, and Quick calc is a calculator —
+     it has no area to hang ticks on and deliberately gets no install slot of
+     its own. That is the whole containment model, and inverting it here is what
+     stops every individual guard from having to be re-reasoned: the guards below
+     did not change, only what this returns. */
+  function isReadOnlyLayout(){ return !inArea(); }
 
   function readInputs(){
     var gap = measIn("f-gap");
@@ -3111,9 +3114,26 @@ var FL = (function(){
     switchScreen("s-layout");
   }
 
+  /* Quick calc — the Setup screen's Generate button, and the ONLY entry that is
+     neither a demo nor an area.
+
+     It exists to clear the other two flags. Nothing used to do that: leave a
+     sample on screen, tab to Setup, tap Generate, and sampleMode was still set.
+     While every mode was read-only that only cost the user a Row-complete
+     button. Now that area mode writes, the same path with areaMode left set
+     would file Quick calc's ticks against whatever area was last open — a real
+     job's floor, silently renumbered by a calculation. So the entry points set
+     the flags rather than trusting the exits to have cleared them. */
+  function startQuickCalc(){
+    sampleMode = false;
+    areaMode = false; AREA = null;
+    generate();
+  }
+
   // The sample room: the same engine, the same renderers, read-only.
   function showSample(){
     sampleMode = true;
+    areaMode = false; AREA = null;   // both flags, every entry — see startQuickCalc
     generate();                 // reads the f-* inputs the caller has just set
     if(!S.cands.length){        // generate() alerts and bails on bad input
       sampleMode = false;
@@ -3137,18 +3157,37 @@ var FL = (function(){
      to keep in sync, and `test_area.js` would be pinning a coincidence. */
   function showArea(meta){
     areaMode = true;
+    sampleMode = false;         // both flags, every entry — see startQuickCalc
     AREA = meta || null;
     generate();
     if(!S.cands.length){        // generate() alerts and bails on bad input
       areaMode = false; AREA = null;
       return false;
     }
-    S.done = {};                // an area preview never inherits install ticks
+    /* NOTE what is NOT here any more: `S.done = {}`. An area preview used to
+       throw the ticks away because it had none of its own to load. It has now —
+       generate() already called loadProgress(S.fp), which asks THIS area's
+       install record — so blanking it here would wipe the screen of the exact
+       progress this stage exists to keep. Reopening a half-laid area lands on
+       the row you left off at. */
     renderLayout();
     renderCuts();
     return true;
   }
-  function exitArea(){ areaMode = false; AREA = null; }
+  /* Leaving an area drops its ticks off the SCREEN — never out of the record.
+
+     S survives a screen change, so without this the ticks stayed in S.done with
+     areaMode already false: the layout was read-only again, but "Clear progress"
+     is gated on hasProgress() rather than on the predicate, so it reappeared —
+     a button that would wipe the screen and, having no slot to write through,
+     leave the stored record exactly where it was. Clearing here is what makes
+     the two agree. The record on the area is untouched and reloads the moment
+     you open that area again. */
+  function exitArea(){
+    areaMode = false; AREA = null;
+    S.done = {};
+    refreshWake();               // you are not on the floor any more
+  }
 
   /* A banded (L) area. Parameters still come from Setup — readInputs() supplies
      the plank, the stagger rule and the gap — and only the GEOMETRY comes from
@@ -3158,10 +3197,11 @@ var FL = (function(){
     var base = readInputs();
     if (!base){ alert("Check the plank dimensions — they all need to be above zero."); return false; }
     areaMode = true;
+    sampleMode = false;         // both flags, every entry — see startQuickCalc
     AREA = meta || null;
     generate(bandedCfg(bands, base));
     if(!S.cands.length){ areaMode = false; AREA = null; return false; }
-    S.done = {};
+    // No S.done reset here either — an L area keeps its ticks like any other.
     renderLayout();
     renderCuts();
     return true;
@@ -3170,59 +3210,92 @@ var FL = (function(){
   function reshuffle(){
     if (!S.cands.length) return;
     if ((S.deckSize || 0) <= 1) return;   // nothing visibly different to shuffle to
-    // Reshuffle now WORKS in the demo. It is safe because saveProgress() is
-    // scoped to real installs, not because this button is hidden — containment
-    // lives at the write, so the demo can show the generator actually generating.
-    // A different layout means the row numbers mean something different. Say so
-    // before the ticks are thrown away, rather than after.
+    // Reshuffle WORKS in the demo. It is safe because saveProgress() is scoped
+    // to real installs, not because this button is hidden — containment lives at
+    // the write, so the demo can show the generator actually generating.
+    /* A different layout renumbers the cuts, so the ticks cannot come with you.
+       Say so before they leave the screen, rather than after.
+
+       But leaving the screen is ALL they do. This used to overwrite the saved
+       record with an empty one on the way past, which meant a shuffle you
+       immediately regretted had already destroyed a half-laid floor — the
+       confirm asked about something that was then done irreversibly, one tap
+       deep. Nothing is written here now: the stored record keeps pointing at the
+       layout it was made on, and loadProgress() below restores the ticks the
+       moment you land back on that card. Cycling the deck all the way round is
+       the undo. The record is only replaced when you tick a row on a DIFFERENT
+       layout — a deliberate act on the floor you actually chose. */
     if (hasProgress()){
-      if (!window.confirm("You've laid " + doneCount() + " row(s). A different layout renumbers the "
-        + "cuts, so that progress will be cleared. Reshuffle anyway?")) return;
+      if (!window.confirm("You've laid " + doneCount() + " row(s). A different layout renumbers "
+        + "the cuts, so those ticks won't show on it — they come back if you shuffle back to "
+        + "this one. Reshuffle anyway?")) return;
     }
     // Cycle only the cards that actually look different from each other.
     var n = Math.max(1, Math.min(S.deckSize || 1, S.cands.length));
     S.active = (S.active + 1) % n;
     S.box = boxPlan(S.cands[S.active].rows, S.cfg);
     S.fp = fingerprint(S.cfg, S.cands[S.active]);
-    S.done = {};
-    saveProgress();
+    S.done = loadProgress(S.fp);   // the ticks for THIS card, if it has any
     refreshWake();
     renderLayout();
   }
 
-  // ---------- progress ----------
-  // Progress belongs to ONE specific layout. Reshuffle or change the room and the
-  // row numbers underneath it mean something different, so the ticks are pinned to
-  // a fingerprint of the exact layout they were made against.
-  var PKEY = "egs-floor-progress";
+  /* ---------- progress ------------------------------------------------------
+
+     Progress belongs to ONE specific layout of ONE specific area.
+
+     THE AREA half is the storage: there is no key in here any more. The old
+     `egs-floor-progress` was a single global localStorage slot — one floor at a
+     time for the whole app — which is why every other mode had to be forbidden
+     from writing to it. An install belongs to a floor, and a job can have two
+     floors half-laid at once, so the record moved onto the area in the job
+     store. This module cannot see the store (JOB and persist() live in the
+     sealed block 3 and are not global, and the dependency deliberately runs one
+     way), so block 3 hands the area's record in and out through AREA.install:
+
+         AREA.install = { load: function(){ return [rowNumbers] | null },
+                          save: function(fp, doneRows){ } }
+
+     Missing or malformed, both functions below no-op — an adapter that is not
+     there means a layout with nowhere to write, which is exactly Quick calc.
+
+     THE LAYOUT half is the fingerprint, unchanged: row numbers only mean
+     something against the layout they were made on. Shuffle the deck and "row
+     4" is a different set of cuts, so a record whose fp does not match reads as
+     no progress at all — never as somebody else's row 4. */
   function fingerprint(cfg, cand){
     return [cfg.runIn, cfg.acrossIn, cfg.plankLen, cfg.plankWid, cfg.nRows,
             cand.rows.map(function(r){ return Math.round(r.start*2); }).join(".")].join("|");
   }
+  function installSlot(){
+    return (areaMode && AREA && AREA.install) ? AREA.install : null;
+  }
   function loadProgress(fp){
+    var slot = installSlot();
+    if (!slot || typeof slot.load !== "function") return {};
     try{
-      var raw = window.localStorage.getItem(PKEY);
-      if (!raw) return {};
-      var o = JSON.parse(raw);
-      if (!o || o.fp !== fp) return {};
-      var d={}; (o.done||[]).forEach(function(n){ d[n]=true; });
+      var rows = slot.load(fp) || [];
+      var d={}; rows.forEach(function(n){ d[Number(n)] = true; });
       return d;
     } catch(e){ return {}; }
   }
-  /* THE containment point for sample mode. Scoping the WRITE, rather than
-     removing the buttons that reach it, is what lets the demo run the real
-     generator: Reshuffle can work, because the one thing it must not do — touch
-     a real install's saved ticks — cannot happen from here.
+  /* THE containment point, and it is still at the WRITE rather than at the
+     buttons that reach it. What changed at Stage 4 is which way round the
+     predicate runs: area mode is now the mode that writes and everything else
+     is the exception, where it used to be the other way about. The guard line
+     itself is untouched — that is the point of having one predicate.
 
-     egs-floor-progress is a single GLOBAL slot, not per-job. A user mid-install
-     who opens the demo out of curiosity and shuffles it must come back to their
-     rows exactly as they left them. Every write to that key goes through this
-     function; keep it that way. */
+     Quick calc reaches here with no adapter and writes nothing, which is not a
+     restriction bolted on: a calculation has no area, so there is nothing for a
+     tick to belong to. The demo is barred twice over — no adapter AND the
+     guard — because a demonstration is not something you install from. */
   function saveProgress(){
     if (isReadOnlyLayout()) return;
+    var slot = installSlot();
+    if (!slot || typeof slot.save !== "function") return;
     try{
       var done=[]; for (var k in S.done){ if (S.done[k]) done.push(Number(k)); }
-      window.localStorage.setItem(PKEY, JSON.stringify({ fp:S.fp, done:done }));
+      slot.save(S.fp, done);
     } catch(e){}
   }
   function doneCount(){ var n=0; for (var k in S.done){ if (S.done[k]) n++; } return n; }
@@ -3233,8 +3306,9 @@ var FL = (function(){
   function hasProgress(){ return doneCount() > 0; }
 
   function toggleRow(n){
-    // Neither a demo nor a per-area preview is something you install FROM: the
-    // progress key has one global slot and no idea which area you mean.
+    // A tick has to belong to something. Inside an area of a job it belongs to
+    // that area's floor; a demo is not a floor and a Quick calc has no area, so
+    // there is nowhere to file it and the honest answer is not to pretend.
     if (isReadOnlyLayout()) return;
     if (S.done[n]) delete S.done[n]; else S.done[n] = true;
     saveProgress();
@@ -3924,7 +3998,11 @@ var FL = (function(){
     var foot = $("fl-ov-foot");
     clear(foot);
     var cur = currentRow();
-    foot.textContent = cur
+    // "next up" is the install talking. Without one, every row is row 1 and the
+    // phrase is noise dressed as guidance.
+    foot.textContent = isReadOnlyLayout()
+      ? "Pinch to zoom \u00b7 tap any row to open its cuts"
+      : cur
       ? "Pinch to zoom \u00b7 tap any row to open its cuts \u00b7 next up: row " + cur
       : (S.cfg.nRows + " of " + S.cfg.nRows + " rows done \u2014 pinch to zoom, tap a row to review");
   }
@@ -4090,6 +4168,29 @@ var FL = (function(){
     return wrap;
   }
 
+  /* The no-install marker — same family as the one-card marker above, and for
+     the same reason: it stands in the exact slot of the control it replaces, at
+     the same weight, and explains an absence rather than leaving a hole where
+     the Row-complete button used to be.
+
+     Quick calc only. A demo already carries a banner saying it is a demo; this
+     one answers a question a real user will really ask — "why can't I tick these
+     off?" — and the answer is that a tick has to belong to a floor. It carries
+     its own data-marker so a later visibility rule can select it, and NOT
+     .helpdot, which :root[data-guide="expert"] hides wholesale: an expert needs
+     this more than a beginner, being the one who will go looking for the button.
+
+     COPY IS A DRAFT, flagged for Edwin. The facts in it are the ones that hold:
+     installs live under a job, and creating one is the way to get ticking. */
+  function installMarker(){
+    var row = el("div","fl-onecard");
+    row.setAttribute("data-marker","install.nojob");
+    var t = el("span","oc-txt");
+    t.textContent = "Install tracking lives with a job — create one to tick off rows.";
+    row.appendChild(t);
+    return row;
+  }
+
   /* The area badge. Names the area, and NAMES THE PARAMETERS it was built from.
 
      That second half is the point. `stgReadSetup`'s sin was reading hidden
@@ -4172,7 +4273,10 @@ var FL = (function(){
     }
 
     var hint=el("p","fl-hint");
-    hint.textContent="Tap the floor to zoom, rotate and tick off rows";
+    // The zooming and rotating are true everywhere; the ticking is not.
+    hint.textContent = isReadOnlyLayout()
+      ? "Tap the floor to zoom and rotate"
+      : "Tap the floor to zoom, rotate and tick off rows";
     card.appendChild(hint);
 
     if (LEGENDS[S.view]){
@@ -4299,7 +4403,13 @@ var FL = (function(){
     var cur = currentRow();
 
     var head=el("div","card");
-    var hl=el("p","lbl"); hl.textContent = cur ? "Now laying \u2014 row " + cur : "All rows laid";
+    var hl=el("p","lbl");
+    // "Now laying" is a claim about an install in progress. Without somewhere to
+    // record one, the screen is showing you where a floor STARTS, not where you
+    // are in it \u2014 so it says that instead.
+    hl.textContent = !cur ? "All rows laid"
+                   : isReadOnlyLayout() ? "First cuts \u2014 row " + cur
+                   : "Now laying \u2014 row " + cur;
     head.appendChild(hl);
 
     if (cur){
@@ -4313,11 +4423,22 @@ var FL = (function(){
       sub.textContent = r.src;
       head.appendChild(sub);
 
-      if (!inSample()){
+      /* The Row-complete button, or the marker that stands where it would be.
+
+         This asked !inSample() before Stage 4, which meant Quick calc shipped a
+         button that called a guarded toggleRow() \u2014 it looked like it worked and
+         it did nothing. Now it asks the one containment predicate, like every
+         other guard, and the read-only case says why the button is not there
+         rather than leaving a gap. The demo is the exception: its own banner
+         already explains what it is, and a second explanation under it would be
+         nagging. */
+      if (!isReadOnlyLayout()){
         var done=el("button","fl-done-btn");
         done.textContent = "\u2713  Row " + cur + " complete";
         done.addEventListener("click", function(){ toggleRow(cur); });
         head.appendChild(done);
+      } else if (!inSample()){
+        head.appendChild(installMarker());
       }
     } else {
       var p=el("p"); p.style.fontSize="13px"; p.style.color="var(--paper-dim)"; p.style.margin="0";
@@ -4325,7 +4446,10 @@ var FL = (function(){
       head.appendChild(p);
     }
 
-    head.appendChild(progressBlock());
+    // "0 of 14 rows laid" under a screen you cannot tick from is a progress bar
+    // measuring nothing. It belongs to an install, so it appears where one can
+    // exist.
+    if (!isReadOnlyLayout()) head.appendChild(progressBlock());
 
     var back=el("button","fl-undo-btn");
     back.textContent = "\u2922  Back to the wide view";
@@ -4341,7 +4465,11 @@ var FL = (function(){
     body.appendChild(head);
 
     var card=el("div","card");
-    var lbl=el("p","lbl"); lbl.textContent="Cut sequence \u2014 tap a row to tick it off";
+    // The rows genuinely lose their tap affordance in a read-only layout
+    // (cutRow drops .fl-tapzone and the handler), so the heading must not still
+    // be inviting a tap that does nothing.
+    var lbl=el("p","lbl");
+    lbl.textContent = isReadOnlyLayout() ? "Cut sequence" : "Cut sequence \u2014 tap a row to tick it off";
     card.appendChild(lbl);
     cand.rows.forEach(function(r){ card.appendChild(cutRow(r, cfg, cur)); });
     body.appendChild(card);
@@ -4509,7 +4637,13 @@ var FL = (function(){
   }
 
   return {
-    generate: generate,
+    /* generate() is deliberately NOT exported. It does not touch the mode flags
+       — it cannot, since showSample and showArea both call it after setting
+       theirs — so an outside caller reaching it directly runs a layout under
+       whatever mode happened to be left over. Every way in from outside this
+       module is an entry point that declares its mode: startQuickCalc,
+       showSample, showArea, showAreaField. */
+    startQuickCalc: startQuickCalc,
     showSample: showSample,
     exitSample: exitSample,
     inSample: inSample,
@@ -4525,7 +4659,10 @@ var FL = (function(){
   };
 })();
 
-$("f-btn-generate").addEventListener("click", FL.generate);
+// startQuickCalc, not generate: Setup's Generate is an ENTRY, and an entry sets
+// the modes. Wiring generate() straight to the button is what let a stale flag
+// survive into a fresh calculation. See startQuickCalc() for what that cost.
+$("f-btn-generate").addEventListener("click", FL.startQuickCalc);
 //  ===== FLOORING MODULE END =====
 // ============================================================
 </script>
@@ -5751,7 +5888,7 @@ var StaggerStore = (function(){
 // ============================================================================
 
 var STORE_KEY = "stagger.store.v1";
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 
 // ---- id + clock (injectable for tests) ----
 function _uid(){
@@ -5773,12 +5910,25 @@ function emptyStore(){
 //              `mode` stays the "floor"/"panel" work mode]
 // Anything that renames a field must also add it here, or migrated records and
 // freshly-created ones drift apart.
+//
+// `install` (v3) is the row-tick record for THIS area's floor:
+//   { fp, done:[rowNumbers], updatedAt } | null
+// It lives on the area rather than in a global slot because an install belongs
+// to a floor, and two floors can be half-laid at the same time — which the old
+// single `egs-floor-progress` key could not express at all. `fp` is the layout
+// fingerprint the ticks were made against; a record whose fp does not match the
+// layout on screen is stale and reads as no progress, never as row 4 of a
+// different floor.
 function geometryDefaults(){
   return { materialType:null, unitsMode:"imperial", excluded:false,
            rects:null, edges:null, inches:null, sqft:null,
-           engineInput:null, runOverride:null };
+           engineInput:null, runOverride:null, install:null };
 }
-function applyAreaV2(a){
+// Named for the shape, not for one version: it applies whatever
+// geometryDefaults() currently says an area carries. v3 added `install` through
+// this same door, and every migration that touches areas calls it, so a record
+// migrated from v1 and one created today carry the same field set.
+function applyAreaDefaults(a){
   var d=geometryDefaults();
   Object.keys(d).forEach(function(k){ if(a[k]===undefined) a[k]=d[k]; });
   if(a.pinned===undefined) a.pinned=null;
@@ -5799,7 +5949,18 @@ var MIGRATIONS = [
       if(j.wastePct===undefined) j.wastePct=10;
       if(j.boxCov===undefined) j.boxCov="";
       if(!Array.isArray(j.areas)) j.areas=[];
-      j.areas.forEach(applyAreaV2);
+      j.areas.forEach(applyAreaDefaults);
+    });
+    return s;
+  },
+  // [2] v2 -> v3 : `install` on every area — the per-area row-tick record that
+  //     replaced the single global egs-floor-progress slot. Additive: an area
+  //     that has never been installed carries null, which reads exactly as the
+  //     absence of the field did.
+  function v2_to_v3(s){
+    (s.jobs||[]).forEach(function(j){
+      if(!Array.isArray(j.areas)) j.areas=[];
+      j.areas.forEach(applyAreaDefaults);
     });
     return s;
   }
@@ -5888,7 +6049,7 @@ function createArea(store, jobId, name, mode){
   var area={ id:_uid(), name:(name||"New area").trim(), mode:(mode||"floor"),
              dims:defaultDims(), truss:{ oc:24, offsetIn:18 },
              material:{ faceIn:5.0, lengthsAvailFt:[12,14,16] }, pinned:null };
-  applyAreaV2(area);
+  applyAreaDefaults(area);
   j.areas.push(area); j.updatedAt=_now(); return area;
 }
 function getArea(job, areaId){ return job ? (job.areas.find(function(a){ return a.id===areaId; })||null) : null; }
@@ -5909,6 +6070,35 @@ function effectiveDims(area, computedFn){
     widthSource: (d.siteWidthIn!=null) ? "site" : "computed",
     depthSource: (d.siteDepthIn!=null) ? "site" : "computed"
   };
+}
+
+// ---- per-area install progress --------------------------------------------
+// One record per area, written WHOLE rather than patched, so a half-applied
+// write cannot leave ticks pointing at a layout they were not made on.
+//
+// The fingerprint is the whole safety story. Row numbers only mean something
+// against one specific layout: reshuffle the deck or re-measure the room and
+// "row 4" is a different set of cuts. So readInstall() hands back nothing at
+// all unless the fp matches, and a stale record is left alone rather than
+// deleted — shuffle back to the layout you were laying and your ticks are
+// still there.
+function setInstall(area, fp, doneRows){
+  if(!area) return null;
+  var rows = (doneRows||[]).map(Number).filter(function(n){ return n>0; });
+  rows.sort(function(a,b){ return a-b; });
+  area.install = { fp:String(fp), done:rows, updatedAt:_now() };
+  return area.install;
+}
+function readInstall(area, fp){
+  var rec = area && area.install;
+  if(!rec || rec.fp !== String(fp) || !Array.isArray(rec.done)) return [];
+  return rec.done.slice();
+}
+// "Is some OTHER layout of this area part-laid?" — what a reshuffle has to ask
+// before it moves the ground under a record it is not about to rewrite.
+function installIsStale(area, fp){
+  var rec = area && area.install;
+  return !!(rec && rec.fp !== String(fp) && (rec.done||[]).length);
 }
 
 // ---- pin / unpin a chosen layout on an area ----
@@ -5961,7 +6151,8 @@ function importJSON(store, text){
 }
 return {
   STORE_KEY, SCHEMA_VERSION, emptyStore, migrate, loadStore, saveStore,
-  geometryDefaults, applyAreaV2,
+  geometryDefaults, applyAreaDefaults,
+  setInstall, readInstall, installIsStale,
   createJob, getJob, renameJob, deleteJob,
   createArea, getArea, deleteArea, defaultDims, effectiveDims,
   pinLayout, unpinLayout, jobBoardSummary,
@@ -6059,6 +6250,12 @@ function migrateArea(a){
     truss: { oc:24, offsetIn:18 },
     material: { faceIn:5.0, lengthsAvailFt:[12,14,16] },
     pinned: null,
+    // A legacy area has no install record and cannot: stagger.jobs.v1 predates
+    // per-area progress entirely. Written explicitly rather than left off,
+    // because this is a hand-kept field list — an area arriving from here and
+    // one from createArea() must carry the same shape, or the difference shows
+    // up later as a field that exists on some records and not others.
+    install: null,
     // ---- carried across from stagger.jobs.v1 ----
     materialType: (typeof a.material==="string") ? a.material : null,
     unitsMode: (a.mode==="metric" || a.mode==="imperial") ? a.mode : "imperial",
@@ -6388,6 +6585,37 @@ function storeCommit(){
   if(STORE_RO) return false;                       // never overwrite newer data
   return StaggerStore.saveStore(storeDoc()).ok;
 }
+/* ---- the legacy global progress slot, dropped -----------------------------
+   `egs-floor-progress` was one slot for the whole app: {fp, done:[rows]} for
+   whichever floor was last on screen. Stage 4 moved install progress onto the
+   area it belongs to, and nothing reads or writes that key any more.
+
+   It is DROPPED, not migrated. Deliberately, and this is the one place in the
+   app that deletes something without asking:
+
+     - There is nothing to migrate it TO. The record names a layout by
+       fingerprint and says nothing about which room it was, so there is no
+       honest way to decide which area — of which job — it belongs to. Attaching
+       it to a guess would put ticks on a floor nobody laid.
+     - What it holds is a handful of row numbers for one layout that is not
+       necessarily even on screen any more, recoverable in the time it takes to
+       look at the floor. Nothing measured, nothing typed, nothing that took
+       work to produce. Jobs, areas and measurements are untouched.
+
+   The alternative — leave it sitting there unread, as stagger.jobs.v1 is left —
+   was considered and rejected for this key: legacy jobs are still offered to the
+   user through the migration screen, so that key has a live purpose. This one
+   has none, and a stale key nothing reads is a trap for the next person who
+   greps for it. Removal is once, flagged, and idempotent. */
+var INSTALL_MOVED_KEY = "stagger.installMoved";
+(function dropLegacyProgressSlot(){
+  try{
+    if (window.localStorage.getItem(INSTALL_MOVED_KEY)) return;
+    window.localStorage.removeItem("egs-floor-progress");
+    window.localStorage.setItem(INSTALL_MOVED_KEY, "1");
+  } catch(e){}
+})();
+
 function newId(){ return 'job_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function blankJob(){ return StaggerStore.createJob(storeDoc(), 'Untitled job'); }
 
@@ -6524,6 +6752,14 @@ function saveCurrentArea(){
   // must keep its id and its pinned choice — replacing the object would drop both.
   area.id     = prev ? prev.id     : ('ar-'+Date.now().toString(36)+Math.random().toString(36).slice(2,8));
   area.pinned = prev ? prev.pinned : null;
+  /* And its install record. This is a rebuild from a hand-written field list, so
+     anything not named here is erased on the next re-measure — which for a
+     half-laid floor would mean walking back into the room to a blank sheet.
+     Carrying it is safe even when the measurements really did change: the record
+     is fingerprinted, so ticks made against the old dimensions read as no
+     progress rather than as progress against the new ones. Correct a typo in one
+     wall and undo it, and the ticks are still there. */
+  area.install = prev ? prev.install : null;
   area.mode   = prev ? prev.mode   : 'floor';
   area.dims   = prev ? prev.dims   : StaggerStore.defaultDims();
   area.truss  = prev ? prev.truss  : { oc:24, offsetIn:18 };
@@ -7372,6 +7608,29 @@ function stgAreaRect(area){
   return (f && f.kind === 'rect') ? f.rect : null;
 }
 
+/* The install adapter — the ONLY way row ticks cross from the layout module
+   into the job store.
+
+   FL cannot see JOB or persist(): they live inside this sealed block and are
+   not global, and the dependency between the two blocks runs one way on purpose
+   (everything FL needs outward IS global; nothing of this block's is). So the
+   store side is handed IN, bound to one area, as two functions. FL never learns
+   what an area is, a job is, or where any of it is written — it asks for the
+   rows for a fingerprint and hands back the rows for a fingerprint.
+
+   Bound to the area OBJECT, not to its index: `i` is a position in JOB.areas and
+   a rename or a delete moves it, which would file the next tick against a
+   neighbouring floor. The object survives both. */
+function stgInstallSlot(area){
+  return {
+    load: function(fp){ return StaggerStore.readInstall(area, fp); },
+    save: function(fp, doneRows){
+      StaggerStore.setInstall(area, fp, doneRows);
+      persist();                    // whole job, the same door every other write uses
+    }
+  };
+}
+
 function stgShowAreaLayout(i){
   var area = JOB && JOB.areas ? JOB.areas[i] : null;
   if (!area) return;
@@ -7385,7 +7644,8 @@ function stgShowAreaLayout(i){
   // The Setup fields carry the room for a rectangle, and the field's overall
   // extent for an L — the badge names what was measured either way, and the
   // plank/rule parameters come from those same fields in both cases.
-  var meta = { name:area.name, jobName:(JOB && JOB.name) || "" };
+  var meta = { name:area.name, jobName:(JOB && JOB.name) || "",
+               install:stgInstallSlot(area) };
   var okShow;
   stgCloseJobs();                          // #jobsOverlay is z-index 9000; the
                                            // fullscreen layout overlay is 80, so

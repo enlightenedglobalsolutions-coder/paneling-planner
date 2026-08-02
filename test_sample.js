@@ -158,26 +158,51 @@ console.log("\nCONTAINMENT IS AT THE WRITE, NOT AT THE BUTTON");
   // starts clobbering a real install's ticks again — and nothing on screen says so.
   var i = html.indexOf('function saveProgress(){');
   var body = html.slice(i, html.indexOf('function doneCount(', i));
-  // Assert the GUARD, not its spelling. Stage 3 widened `inSample()` to
-  // `isReadOnlyLayout()` so the per-area preview is covered by the same rule —
-  // pinning the old identifier would have read that strengthening as a break.
+  /* Assert the GUARD, not its spelling — and now not its STORAGE either.
+
+     This block has survived two rewrites underneath it, and it is the same
+     lesson each time. Stage 3 widened `inSample()` to `isReadOnlyLayout()`;
+     pinning the old identifier would have read that strengthening as a break.
+     Stage 4 inverted the predicate and moved progress out of localStorage onto
+     the area — pinning `setItem(PKEY` would have read THAT as a break too.
+
+     What this suite is actually for has never changed and must not: the demo
+     writes nothing. Stage 4's containment assertions moved in `test_area.js`,
+     with the reason, because area mode's restriction expired. The demo's did
+     not expire and this suite is deliberately the independent proof of it — so
+     it checks the guarantee against whatever the mechanism currently is. */
   ok("saveProgress() returns early for a read-only layout",
      /if \(isReadOnlyLayout\(\)\) return;/.test(body));
-  ok("...before it reaches setItem",
-     body.indexOf('isReadOnlyLayout()') < body.indexOf('setItem'));
-  // And the predicate must actually cover both modes.
+  ok("...before it reaches any write",
+     body.indexOf('isReadOnlyLayout()') < body.indexOf('slot.save'));
+  // The predicate must still put the demo on the read-only side of the line.
   var p = html.indexOf('function isReadOnlyLayout(){');
-  ok("...and that predicate covers the demo AND a per-area preview",
-     /return sampleMode \|\| areaMode;/.test(html.slice(p, p+120)));
+  ok("...and the predicate reads: not an area, not writable",
+     /return !inArea\(\);/.test(html.slice(p, p+140)));
+  ok("...which excludes the demo, because entering it clears area mode",
+     /function showSample\(\)\{[\s\S]{0,200}?areaMode = false; AREA = null;/.test(html));
 
-  // Every write to the progress key must go through saveProgress().
-  var writes = html.match(/localStorage\.setItem\(PKEY/g) || [];
-  ok("exactly one place writes egs-floor-progress", writes.length===1, writes.length+" writers");
+  // The demo is barred TWICE: by the predicate, and by having no install slot to
+  // write through. Only an area is ever handed one.
+  var slot = html.indexOf('function installSlot(){');
+  ok("the write needs an install slot, and only area mode has one",
+     /return \(areaMode && AREA && AREA\.install\) \? AREA\.install : null;/
+       .test(html.slice(slot, slot+220)));
+  var showSample = html.indexOf('function showSample(){');
+  var sbody = html.slice(showSample, html.indexOf('function exitSample', showSample));
+  // Grep the ASSIGNMENT, not the word: the body carries a comment about not
+  // inheriting a real install's ticks, and matching prose reports a bug that
+  // is not there.
+  ok("...and showSample nulls AREA rather than supplying one",
+     // The lookahead sits OUTSIDE the whitespace on purpose: `\s*(?!null)` is
+     // satisfied by backtracking to zero spaces, so it matches everything.
+     /AREA = null;/.test(sbody) && !/AREA\s*=(?!\s*null)/.test(sbody)
+     && !/\.install\s*=/.test(sbody));
 
   // Ticking stays off: a demonstration is not something you install from.
   var t = html.indexOf('function toggleRow(n){');
   ok("toggleRow still refuses in a read-only layout",
-     /if \(isReadOnlyLayout\(\)\) return;/.test(html.slice(t, t+320)));
+     /if \(isReadOnlyLayout\(\)\) return;/.test(html.slice(t, t+400)));
 
   // And the button is no longer hidden — that was the point.
   ok("Reshuffle is no longer gated on !inSample()",

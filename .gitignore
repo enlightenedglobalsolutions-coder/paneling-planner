@@ -4,6 +4,16 @@ _old/
 # Backups written by egs-deploy.sh
 index.html.bak.*
 
+# Backups taken before editing an inlined module (store.js, migrate_jobs.js, ...)
+# and by the CLAUDE.md doctor. Local safety copies — egs-deploy.sh runs `git add -A`,
+# so anything not listed here ships.
+*.js.bak.*
+*.bak-doctor
+
+# Local Claude Code permissions. The SKILL under .claude/skills IS committed —
+# CLAUDE.md points at it, so a clone without it has a dead pointer.
+.claude/settings.local.json
+
 # Scratch theme preview — judged locally, never shipped to Pages.
 preview.html
 

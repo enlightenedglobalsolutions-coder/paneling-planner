@@ -191,43 +191,87 @@ console.log("\nTHE HARD CHECKPOINT — area and Quick calc are ONE code path");
 })();
 
 // ===========================================================================
-console.log("\nNOTHING IS PERSISTED");
+console.log("\nAN AREA IS THE ONE THING YOU INSTALL FROM  (was: NOTHING IS PERSISTED)");
 // ===========================================================================
-(function(){
-  // Same containment pattern 2.5b proved, widened to cover area mode. The key
-  // has one global slot and no idea which area you mean, so writing from a
-  // per-area preview would overwrite whatever is actually being installed.
-  var p = html.indexOf('function isReadOnlyLayout(){');
-  ok("one predicate covers both read-only layouts",
-     /return sampleMode \|\| areaMode;/.test(html.slice(p, p+140)));
+/* RE-GOLDENED AT STAGE 4, ON PURPOSE. Read this before "fixing" it back.
 
+   Stage 3 shipped an area layout read-only, and this block asserted exactly
+   that: the join persisted nothing, wrote no progress, and left row ticking off.
+   Those assertions were right for the reason they gave — progress had nowhere to
+   live. `egs-floor-progress` was one global localStorage slot for the whole app,
+   so a per-area write could only overwrite whatever floor the user was actually
+   laying. The restriction was a consequence of the storage, not a view about
+   what an area should be.
+
+   Stage 4 gave progress somewhere to live: a record ON the area, in the job
+   store, fingerprinted to the layout it was made against. The reason expired, so
+   the assertions expire with it — and they invert rather than relax. Area mode
+   is now the ONLY mode that writes. What must not move is the OTHER half of the
+   containment, which is `test_sample.js`'s: the demo still writes nothing, and
+   that suite was left to prove it independently of this one.
+
+   The old assertions, and what replaced each:
+     "one predicate covers both read-only layouts"  -> the predicate now names
+        area mode as the exception, so it is asserted from the other side.
+     "the join never persists to the store"         -> the join now persists, via
+        exactly one adapter; asserted as "only through the adapter".
+     "still exactly one writer of the progress key" -> there is no key. Asserted
+        as "the key is gone from the file entirely".                            */
+(function(){
+  var p = html.indexOf('function isReadOnlyLayout(){');
+  ok("the predicate is inverted: read-only unless you are in an area",
+     /return !inArea\(\);/.test(html.slice(p, p+140)));
+
+  // The guards themselves did NOT change — that is the point of one predicate.
   var s = html.indexOf('function saveProgress(){');
-  ok("saveProgress() refuses for either", /if \(isReadOnlyLayout\(\)\) return;/
+  ok("saveProgress() still asks the one predicate", /if \(isReadOnlyLayout\(\)\) return;/
      .test(html.slice(s, html.indexOf('function doneCount(', s))));
   var t = html.indexOf('function toggleRow(n){');
-  ok("toggleRow() refuses for either",
-     /if \(isReadOnlyLayout\(\)\) return;/.test(html.slice(t, t+340)));
-  ok("still exactly one writer of the progress key",
-     (html.match(/localStorage\.setItem\(PKEY/g)||[]).length === 1);
+  ok("toggleRow() still asks the one predicate",
+     /if \(isReadOnlyLayout\(\)\) return;/.test(html.slice(t, t+400)));
 
-  // A row that LOOKS tappable and does nothing is the dishonest failure this
-  // app is written against — the affordance has to go too, not just the handler.
-  ok("rows lose their tap affordance in a read-only layout",
+  /* The global slot is not merely unused, it is gone. Counting the STRING would
+     count the comments explaining why it went — which is prose, and prose is not
+     the thing that can break. What can break is a live read or write reappearing,
+     so that is what is asserted, plus the disappearance of the identifier that
+     used to carry it. */
+  ok("no PKEY variable survives anywhere in the file", html.indexOf('PKEY') < 0);
+  ok("nothing reads or writes the old global slot",
+     !/localStorage\.(getItem|setItem)\(\s*["']egs-floor-progress/.test(html));
+  ok("...it is only ever removed, once",
+     (html.match(/removeItem\("egs-floor-progress"\)/g)||[]).length === 1);
+
+  // Rows are tappable again — in an area, and only there. The affordance and the
+  // handler still travel together, which is what stops a row that looks live
+  // from doing nothing.
+  ok("the tap affordance is still tied to the predicate",
      /isReadOnlyLayout\(\) \? "" : " fl-tapzone"/.test(html));
-  ok("...and lose the handler with it",
+  ok("...and the handler with it",
      /if \(!isReadOnlyLayout\(\)\) row\.addEventListener/.test(html));
 
-  // Reshuffle stays ON — that is the difference from ticking. It is safe for the
-  // same reason it is safe in the demo: the write is scoped, not the button.
+  // Reshuffle was never the containment point and still is not.
   ok("Reshuffle is not gated on area mode", !/inArea\(\) && \(S\.deckSize/.test(html));
 
-  // Nothing about a layout is written back to the job.
+  // The join persists — through the adapter, and nowhere else. What it must
+  // still not touch is the pin: that is Stage 5's, and a layout being installed
+  // is not the same as a layout being chosen.
   var j = html.indexOf('function stgShowAreaLayout(i){');
   var jbody = html.slice(j, html.indexOf('/* The refusal.', j));
-  ok("the join never persists to the store",
-     jbody.indexOf('persist(') < 0 && jbody.indexOf('storeCommit') < 0);
-  ok("...and never writes area.pinned",
-     jbody.indexOf('.pinned') < 0);
+  ok("the join hands the area an install slot",
+     /install\s*:\s*stgInstallSlot\(area\)/.test(jbody));
+  ok("...and still never writes area.pinned", jbody.indexOf('.pinned') < 0);
+
+  // One adapter, bound to the area OBJECT. Binding to the index `i` would file
+  // the next tick against whichever floor had shifted into that slot.
+  var k = html.indexOf('function stgInstallSlot(area){');
+  var kbody = html.slice(k, html.indexOf('function stgShowAreaLayout(', k));
+  ok("the adapter reads and writes through store.js, not by hand",
+     /StaggerStore\.readInstall\(area, fp\)/.test(kbody)
+     && /StaggerStore\.setInstall\(area, fp, doneRows\)/.test(kbody));
+  ok("...and commits through persist(), the same door as every other job write",
+     /persist\(\);/.test(kbody));
+  ok("...and closes over the area object, never its index",
+     kbody.indexOf('JOB.areas[') < 0);
 })();
 
 // ===========================================================================

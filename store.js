@@ -13,7 +13,7 @@
 // ============================================================================
 
 var STORE_KEY = "stagger.store.v1";
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 
 // ---- id + clock (injectable for tests) ----
 function _uid(){
@@ -35,12 +35,25 @@ function emptyStore(){
 //              `mode` stays the "floor"/"panel" work mode]
 // Anything that renames a field must also add it here, or migrated records and
 // freshly-created ones drift apart.
+//
+// `install` (v3) is the row-tick record for THIS area's floor:
+//   { fp, done:[rowNumbers], updatedAt } | null
+// It lives on the area rather than in a global slot because an install belongs
+// to a floor, and two floors can be half-laid at the same time — which the old
+// single `egs-floor-progress` key could not express at all. `fp` is the layout
+// fingerprint the ticks were made against; a record whose fp does not match the
+// layout on screen is stale and reads as no progress, never as row 4 of a
+// different floor.
 function geometryDefaults(){
   return { materialType:null, unitsMode:"imperial", excluded:false,
            rects:null, edges:null, inches:null, sqft:null,
-           engineInput:null, runOverride:null };
+           engineInput:null, runOverride:null, install:null };
 }
-function applyAreaV2(a){
+// Named for the shape, not for one version: it applies whatever
+// geometryDefaults() currently says an area carries. v3 added `install` through
+// this same door, and every migration that touches areas calls it, so a record
+// migrated from v1 and one created today carry the same field set.
+function applyAreaDefaults(a){
   var d=geometryDefaults();
   Object.keys(d).forEach(function(k){ if(a[k]===undefined) a[k]=d[k]; });
   if(a.pinned===undefined) a.pinned=null;
@@ -61,7 +74,18 @@ var MIGRATIONS = [
       if(j.wastePct===undefined) j.wastePct=10;
       if(j.boxCov===undefined) j.boxCov="";
       if(!Array.isArray(j.areas)) j.areas=[];
-      j.areas.forEach(applyAreaV2);
+      j.areas.forEach(applyAreaDefaults);
+    });
+    return s;
+  },
+  // [2] v2 -> v3 : `install` on every area — the per-area row-tick record that
+  //     replaced the single global egs-floor-progress slot. Additive: an area
+  //     that has never been installed carries null, which reads exactly as the
+  //     absence of the field did.
+  function v2_to_v3(s){
+    (s.jobs||[]).forEach(function(j){
+      if(!Array.isArray(j.areas)) j.areas=[];
+      j.areas.forEach(applyAreaDefaults);
     });
     return s;
   }
@@ -150,7 +174,7 @@ function createArea(store, jobId, name, mode){
   var area={ id:_uid(), name:(name||"New area").trim(), mode:(mode||"floor"),
              dims:defaultDims(), truss:{ oc:24, offsetIn:18 },
              material:{ faceIn:5.0, lengthsAvailFt:[12,14,16] }, pinned:null };
-  applyAreaV2(area);
+  applyAreaDefaults(area);
   j.areas.push(area); j.updatedAt=_now(); return area;
 }
 function getArea(job, areaId){ return job ? (job.areas.find(function(a){ return a.id===areaId; })||null) : null; }
@@ -171,6 +195,35 @@ function effectiveDims(area, computedFn){
     widthSource: (d.siteWidthIn!=null) ? "site" : "computed",
     depthSource: (d.siteDepthIn!=null) ? "site" : "computed"
   };
+}
+
+// ---- per-area install progress --------------------------------------------
+// One record per area, written WHOLE rather than patched, so a half-applied
+// write cannot leave ticks pointing at a layout they were not made on.
+//
+// The fingerprint is the whole safety story. Row numbers only mean something
+// against one specific layout: reshuffle the deck or re-measure the room and
+// "row 4" is a different set of cuts. So readInstall() hands back nothing at
+// all unless the fp matches, and a stale record is left alone rather than
+// deleted — shuffle back to the layout you were laying and your ticks are
+// still there.
+function setInstall(area, fp, doneRows){
+  if(!area) return null;
+  var rows = (doneRows||[]).map(Number).filter(function(n){ return n>0; });
+  rows.sort(function(a,b){ return a-b; });
+  area.install = { fp:String(fp), done:rows, updatedAt:_now() };
+  return area.install;
+}
+function readInstall(area, fp){
+  var rec = area && area.install;
+  if(!rec || rec.fp !== String(fp) || !Array.isArray(rec.done)) return [];
+  return rec.done.slice();
+}
+// "Is some OTHER layout of this area part-laid?" — what a reshuffle has to ask
+// before it moves the ground under a record it is not about to rewrite.
+function installIsStale(area, fp){
+  var rec = area && area.install;
+  return !!(rec && rec.fp !== String(fp) && (rec.done||[]).length);
 }
 
 // ---- pin / unpin a chosen layout on an area ----
@@ -224,7 +277,8 @@ function importJSON(store, text){
 
 if(typeof module!=="undefined") module.exports = {
   STORE_KEY, SCHEMA_VERSION, emptyStore, migrate, loadStore, saveStore,
-  geometryDefaults, applyAreaV2,
+  geometryDefaults, applyAreaDefaults,
+  setInstall, readInstall, installIsStale,
   createJob, getJob, renameJob, deleteJob,
   createArea, getArea, deleteArea, defaultDims, effectiveDims,
   pinLayout, unpinLayout, jobBoardSummary,

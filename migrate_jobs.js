@@ -86,6 +86,12 @@ function migrateArea(a){
     truss: { oc:24, offsetIn:18 },
     material: { faceIn:5.0, lengthsAvailFt:[12,14,16] },
     pinned: null,
+    // A legacy area has no install record and cannot: stagger.jobs.v1 predates
+    // per-area progress entirely. Written explicitly rather than left off,
+    // because this is a hand-kept field list — an area arriving from here and
+    // one from createArea() must carry the same shape, or the difference shows
+    // up later as a field that exists on some records and not others.
+    install: null,
     // ---- carried across from stagger.jobs.v1 ----
     materialType: (typeof a.material==="string") ? a.material : null,
     unitsMode: (a.mode==="metric" || a.mode==="imperial") ? a.mode : "imperial",

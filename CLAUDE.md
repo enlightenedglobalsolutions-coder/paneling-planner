@@ -5,17 +5,9 @@ Extends the EGS working standards in `../../CLAUDE.md`. Only repo-specific rules
 ## Inlined modules — re-inline before testing or deploying
 
 `index.html` is a single self-contained file (no `<script src>`), so the tested modules are
-**copied into it**, not linked. Six modules are inlined, in two styles — and since 2026-07-26
-**`reinline.py` covers all six**:
-
-| Module | Inlined as | Tested by |
-|---|---|---|
-| `store.js` | `StaggerStore` IIFE | `test_store.js`, `test_jobs.js` |
-| `migrate_jobs.js` | `StaggerMigrate` IIFE | `test_persist.js` |
-| `diagnose.js` | `StaggerDiag` IIFE | `test_diagnose.js` |
-| `spread.js` | bare, between `/* ==== spread.js (inlined) ... ==== */` sentinels | `test_spread.js` |
-| `lshape.js` | bare, between sentinels | `test_lshape.js` |
-| `bridge.js` | bare, between sentinels | `test_bridge.js` |
+**copied into it**, not linked. Six modules are inlined, in two styles, and since 2026-07-26
+**`reinline.py` covers all six**. Which modules and which style is declared in `reinline.py` itself
+(the `IIFE` and `BARE` lists near the top) — read it there rather than trusting a copy here.
 
 (`inside_dims.js` is **not** inlined — it has no consumer in `index.html` yet.)
 
@@ -163,7 +155,7 @@ are ticked off. `isDone` may only touch opacity (which now fades in *every* view
 used to keep a full-opacity stroke and so read *brighter* than unfinished ones).
 
 It took three passes to stop looking like a graphic. **All three failures were statistical, not
-functional** — the floor rendered fine every time. `test_material.js` (41) pins each one, because
+functional** — the floor rendered fine every time. `test_material.js` pins each one, because
 nothing else would catch a regression:
 
 1. **The checkerboard.** `WOOD[(i*5+p*3) % 6]` — `p*3 % 6` cycles `0,3,0,3`, so every row used
@@ -213,7 +205,7 @@ mixed orientations are worse than either one.
 `labelBaseline()` clamps the cross axis, because a first/last row is only `edgeRip` wide and
 `edgeRip` may be as little as `minRip` (2″) against a 6.4-unit glyph. The extents are **measured and
 asymmetric** — ~0.95em above the baseline, ~0.25em below — and a symmetric half-height under-clamps
-the bottom edge, which is how the last row's number kept clipping. Pinned in `test_labels.js` (22),
+the bottom edge, which is how the last row's number kept clipping. Pinned in `test_labels.js`,
 which also asserts the counter-rotation has not come back.
 
 ### Reshuffle
@@ -266,16 +258,16 @@ numbers in Setup).
 Stage 2 disabled Reshuffle in the demo. Stage 2.5b moved the guard into **`saveProgress()`**, which
 returns early in sample mode — so the button came back and the demo runs the real generator.
 
-This matters because `egs-floor-progress` is a **single global slot**, not per-job, and `reshuffle()`
-writes it unconditionally while its "you'll lose your ticks" confirm reads only the *current*
-session's `S.done` — empty in a demo. A user mid-install who opened the demo out of curiosity and
-shuffled would have had their real row ticks erased with no warning.
-
-**Every write to that key must keep going through `saveProgress()`** — `test_sample.js` asserts
-there is exactly one `setItem(PKEY` in the file. Row ticking stays off (`toggleRow` still refuses in
-sample mode): a demonstration is not something you install from. And the demo must never create
+Containment lives at the write, not at the buttons that reach it, and that has survived the storage
+underneath it changing completely (Stage 4, below). Row ticking stays off in the demo (`toggleRow`
+refuses): a demonstration is not something you install from. And the demo must never create
 `stagger.store.v1` — a seeded job would permanently strand legacy data behind `shouldMigrate()`'s
 bare `jobs.length` check.
+
+`test_sample.js` is deliberately the **independent** proof that the demo writes nothing. It has been
+rewritten twice underneath, for the same lesson each time: assert the guarantee, not the mechanism.
+Stage 3 widened `inSample()` to `isReadOnlyLayout()`; Stage 4 inverted that predicate and took the
+storage out of the module entirely. A suite pinning `setItem(PKEY` would have read both as breaks.
 
 ## The join — per-area layouts (Stage 3)
 
@@ -305,13 +297,100 @@ nothing — no console error, because the handler never ran. Everything it needs
 sixteenths and quietly move a room stored to three decimals. The inch mark makes `parseMeas` return
 the number verbatim. The field's live echo still shows the tape-measure reading.
 
-**Nothing is persisted.** `areaMode` joins `sampleMode` under one predicate, **`isReadOnlyLayout()`**
-— ticking off, Reshuffle on, progress key never written. New guards should ask *that* rather than
-name a mode, which is what stops the next mode from having to remember four separate checks. Rows
-also lose their `.fl-tapzone` affordance: a row that looks tappable and does nothing is the
-dishonest failure this app is written against. Pinning lands in Stage 5; `area.pinned` is
-paneling-shaped (`{scenarioFt, boards}`) and `saveCurrentArea` rebuilds from a 16-name allowlist
-that would erase any new field on the next re-measure.
+**One predicate, `isReadOnlyLayout()`.** New guards ask *that* rather than name a mode, which is what
+stops the next mode from having to remember four separate checks — and it is why Stage 4 could
+invert the whole containment model by changing one return. Rows lose their `.fl-tapzone` affordance
+wherever it is true: a row that looks tappable and does nothing is the dishonest failure this app is
+written against. Pinning still lands in Stage 5; `area.pinned` is paneling-shaped
+(`{scenarioFt, boards}`).
+
+*(Stage 3 shipped an area layout read-only — "nothing is persisted". That expired at Stage 4, which
+is the section below. Read them in order or the reasoning looks contradictory.)*
+
+## Per-area install progress (Stage 4)
+
+**An install belongs to a floor, and a job can have two floors half-laid at once.** That is the whole
+change. `egs-floor-progress` was a **single global localStorage slot** holding `{fp, done}` for
+whichever layout was last on screen, so the app could only ever track one install — which is why
+every mode except the one you happened to be in had to be forbidden from writing. The record moved
+onto the area, in the job store, as **`area.install = {fp, done:[rows], updatedAt}`** (schema **3**).
+
+**The containment model INVERTS. `isReadOnlyLayout()` is now `!inArea()`.** Area mode is the one
+mode that writes; Quick calc and the demo never do. The guards themselves did not change — that is
+the point of having one predicate. Read the predicate as a sentence: a layout is something you look
+at unless it is an area of a job, in which case it is a floor you are laying.
+
+**THE MODE FLAGS ARE NOW MUTUALLY EXCLUSIVE BY CONSTRUCTION, AND THAT IS LOAD-BEARING.** While the
+predicate was `sampleMode || areaMode`, a flag left set from a previous screen only ever made the
+next layout *more* read-only — a harmless direction to leak in, and nothing cleared them. Now a stale
+`areaMode` would file Quick calc's ticks **against whatever area was last open**. So every entry
+point sets *both* flags: `startQuickCalc`, `showSample`, `showArea`, `showAreaField`. Setup's
+Generate button was rewired from `FL.generate` to **`FL.startQuickCalc`**, and `generate()` is no
+longer exported at all — it is the one function that cannot set the flags, since the entries call it
+after setting theirs.
+
+**FL never learns what an area is.** It cannot see `JOB` or `persist()` (block 3, sealed, and the
+dependency runs one way), so block 3 hands in an adapter — `AREA.install = {load(fp), save(fp,rows)}`
+built by `stgInstallSlot(area)`. No adapter means nowhere to write, which is exactly Quick calc: the
+demo is barred twice over, by the predicate *and* by having no slot. The adapter closes over the area
+**object, never its index** — `i` is a position in `JOB.areas` and a rename or delete moves it.
+
+**Removing localStorage from that path is what made it testable.** The whole read/write path is now
+arithmetic over an injected object, so it is registered in `engine_source.js` as the **`install`**
+engine and `test_install.js` *runs* it. What cannot run — the entry points, which render — is
+asserted from source. Both halves are needed: the executable half proves the mechanism, the source
+half proves the real entries reach it (the spec's mode accessors are test-only doors that would
+happily lie).
+
+### A reshuffle never zeroes a half-laid floor
+It confirms, as it always did — but confirming was not enough, because `reshuffle()` also overwrote
+the saved record with an empty one on the way past. A shuffle you immediately regretted had already
+destroyed the floor, one tap deep.
+
+**It now writes nothing at all.** It sets the new fingerprint and calls `loadProgress(S.fp)`. The
+stored record keeps pointing at the layout it was made on, so the ticks vanish from the *screen* and
+come back the moment you land on that card again — **cycling the deck all the way round is the
+undo**, verified in-browser on a 4-card kitchen. The record is replaced only when you tick a row on a
+different layout, which is a deliberate act on the floor you chose.
+
+`readInstall()` returns nothing unless the fp matches, and **a stale record is left alone rather than
+deleted** — that is what makes the above work, and it is also why carrying `install` across a
+re-measure is safe.
+
+### `saveCurrentArea`'s allowlist grew a third name
+It rebuilds the area from a hand-written field list, so anything not named there is erased on the
+next re-measure — for a half-laid floor, that means walking back into the room to a blank sheet.
+`area.install` now sits beside `area.id` and `area.pinned` for the same reason. `migrateArea()` in
+`migrate_jobs.js` is a second hand-written list and carries `install: null` explicitly, so an area
+arriving from `stagger.jobs.v1` and one from `createArea()` have the same field set. `test_install.js`
+asserts they do — the invariant is "these do not drift", not "install exists".
+
+### Quick calc's Install view is honest read-only
+The Row-complete button was gated on `!inSample()`, so **Quick calc shipped a button that called a
+guarded `toggleRow()` — it looked live and did nothing.** It now asks the one predicate, and the
+marker `data-marker="install.nojob"` stands in its exact slot, styled as `.fl-onecard` to match the
+one-card marker. **Not `.helpdot`** — `:root[data-guide="expert"]` hides those wholesale, and the
+person who goes looking for the missing button is the expert. *Copy is a draft, flagged for Edwin.*
+
+Four other lines stopped promising what they cannot deliver in a read-only layout: the progress bar
+(hidden), "Now laying — row N" (→ "First cuts — row N"), "Cut sequence — tap a row to tick it off"
+(→ "Cut sequence"), and the overlay footer's "next up: row N".
+
+`exitArea()` also clears `S.done`. `S` survives a screen change, so without it the ticks stayed on
+screen with `areaMode` already false — and "Clear progress" is gated on `hasProgress()` rather than
+on the predicate, so it reappeared as a button that wipes the screen and, having no slot, leaves the
+stored record untouched.
+
+### The legacy global slot is DROPPED, not migrated
+One-time `removeItem("egs-floor-progress")` behind `stagger.installMoved`. This is the one place in
+the app that deletes without asking, and Edwin ruled it: there is **nothing to migrate it to** — the
+record names a layout by fingerprint and says nothing about which room, so attaching it to a guess
+would put ticks on a floor nobody laid — and what it holds is a handful of row numbers recoverable
+by looking at the floor. Nothing measured or typed is touched.
+
+Deliberately *not* the `stagger.jobs.v1` treatment (left in place, only ever read): that key is still
+offered to the user through the migration screen, so it has a live purpose. This one has none, and a
+stale key nothing reads is a trap for whoever greps for it next.
 
 ### The eye rule — no pattern the eye can follow
 The seam field must show no run the eye can track. **Three or more consecutive steps of similar
@@ -475,7 +554,8 @@ maskable icon 404s.
 ## Test harnesses
 
 **Run everything with `./run_tests.sh`** (optionally `./run_tests.sh engine` to filter). Exit 0 only
-if every suite passes, so it is safe in front of a deploy. 19 suites, 1038 assertions.
+if every suite passes, so it is safe in front of a deploy. It prints the suite and assertion
+totals — read them from the run, never from here.
 
 It **globs `test_*.js`**, so a new harness needs no registration — but it counts assertions by
 grepping for a line matching `^N passed, M failed`. A suite that prints its total any other way
@@ -497,54 +577,24 @@ Assertion count went 506 → 447, which is exactly the 59 duplicates (10 + 23 + 
 
 ### `engine_source.js` — how harnesses get at an engine
 
-Stagger's engines live inside `index.html`. They are pure, so a harness can slice them out and run
-them in node. Doing that per-harness means the day an engine is extracted to a module, every
-harness that sliced it breaks at once. So `engine_source.js` resolves **module-first,
-slice-fallback**:
+Stagger's engines live inside `index.html`. Harnesses do not slice it themselves: they go through
+`engine_source.js`, which resolves **module-first, slice-fallback** and fails **loudly before any
+assertion** rather than letting a harness print a misleading "0 passed, 0 failed".
 
-```js
-var E = require('./engine_source.js');
-var FL = E.load('fl');     // -> require('./fl_engine.js') if it exists
-                           // -> else slice index.html between anchors
-```
+The mechanics — the registry, the anchor rules, and the traps each registered engine encodes — are
+in the `stagger-harnesses` skill. Read it before adding a harness or registering an engine.
 
-Registered engines: `grid`, `fl`, `panel`, `deck`, `material`, `label`, `sample`, `areajoin`. The last three are
-not engines in the layout sense — `material` and `label` are the pure arithmetic behind how the
-drawing *looks*, sliced out because `buildSvg` itself touches the DOM and cannot be; `sample` is a
-config table, sliced for the same reason anything else is, so the numbers on a room card can be run
-against the engine that has to produce them. (`textOn`/`relLum`/`mixHex` ride along inside
-`material`'s range and share its hex helpers, so `test_contrast.js` loads `material` too.)
-**Extracting an engine to a module is a no-op for
-the tests** — proven: writing `grid_geom.js` flips `test_bridge.js` from the slice path to the module
-path with no harness edit and the same 16/16.
-
-The loader fails **loudly and exits 1 before any assertion**, so a harness that cannot load its
-engine never prints a misleading "0 passed, 0 failed". It rejects a missing anchor, an **ambiguous**
-anchor (appearing more than once — an ambiguous slice can silently take the wrong code), a slice
-that has started touching the DOM, and a partial extraction.
-
-Two things the registry encodes that are easy to trip over:
-
-- **The paneling engine is not contiguous.** `assignStock`, `computeTakeoff` and `planOffcuts` sit
-  *outside* its own `PANELING ENGINE END` marker, and all three need `rowName()` ~500 lines further
-  down. Five anchored ranges, concatenated.
-- **`generateOptions` is not pure.** It reads the module global `LONGEST_STOCK` and **overrides its
-  own `capIn` parameter with it**, so the same call returns different results depending on whether
-  `generate()` ran first. The loader declares the binding and exposes `setLongestStock()`; tests set
-  it per case. The impurity only bites when the value crosses a joint-count boundary, which is
-  exactly why it went unnoticed.
-- **`deck` is deliberately NOT part of `fl`.** The Reshuffle deck sits *above* the engine — the
-  `fl` range ends at `readInputs()`, and the deck block starts ~50 lines later. That separation is
-  the whole reason the shuffle work moved **zero goldens**: the deck reorders what the viewer
-  cycles through and never changes what the engine produced. `test_deck.js` asserts `out[0] ===
-  cands[0]` for every room, so if the deck ever starts reordering position 0 it fails *there*,
-  with a message saying why, instead of 105 assertions failing in `test_fl_engine.js` with no
-  explanation. `orderDeck` **writes** `S.deckSize`, so the loader supplies `S` and a
-  `getDeckSize()` accessor.
+**The purity check reads code, not prose.** It used to scan the raw slice for `document.`/`window.`/
+`localStorage`, so a *comment* explaining that a function no longer touches localStorage was enough
+to fail the slice as impure — the exact inversion of what the check is for, and the pressure it
+creates is to mutilate an accurate comment. It now strips comments first. `stripComments` is
+**exported** for the same reason harnesses keep needing it: a block that quotes the thing it forbids
+matches a raw grep for it (`test_area.js`'s refusal, `test_labels.js`'s counter-rotation,
+`test_install.js`'s "reshuffle no longer writes"). One implementation, not three that disagree.
 
 ### The two engine suites are CHARACTERISATION suites
 
-`test_fl_engine.js` (105) and `test_panel_engine.js` (96) pin what the engines do **today**, so the
+`test_fl_engine.js` and `test_panel_engine.js` pin what the engines do **today**, so the
 v3 restructure has to answer one question: *did the layout the user sees change?* They are not
 specifications. **Where the engine has a defect, the defect is pinned and labelled `KNOWN DEFECT`,
 not corrected — when it is fixed, those tests SHOULD fail, and get flipped to assert the new
@@ -572,9 +622,10 @@ order first; digest-only change ⇒ something outside the projection moved.
 
 
 
-All 10 harnesses pass. Most are a plain `require()` of a module; `test_bridge.js`,
-`test_fl_engine.js` and `test_panel_engine.js` get their code through `engine_source.js` (above),
-so they test **what actually ships** and fail if the shipped file drifts.
+Every harness passes — read the suite and assertion totals from `./run_tests.sh`, never from here.
+Most are a plain `require()` of a module; `test_bridge.js`, `test_fl_engine.js`, `test_panel_engine.js`,
+`test_area.js`, `test_deck.js`, `test_labels.js` and `test_install.js` get their code through
+`engine_source.js` (above), so they test **what actually ships** and fail if the shipped file drifts.
 
 `test_bridge.js` is current and passing (16/16). Its header mentions a `stagger-shape-input.html`
 prototype **in the past tense** — that fixture was never in this repo, and the harness was
@@ -592,7 +643,9 @@ grid engine and the two layout engines. Those three are kept in sync by hand, no
 
 ## Persistence
 
-Live key is `stagger.store.v1` (schema 2). The older `stagger.jobs.v1` is migrated once, on
+Live key is `stagger.store.v1` (schema **3** — v3 added `area.install`, see Stage 4 above; the
+migration is additive and runs on load, but the store is only rewritten when something commits, so a
+v2 payload stays v2 on disk until the first real write). The older `stagger.jobs.v1` is migrated once, on
 demand, from the in-app migration screen, and is then **left untouched** — it is only ever read.
 It is cleared solely by the user, from the confirm-gated "Remove old copy" action on the jobs list.
 
@@ -603,7 +656,11 @@ different things. Do not "tidy" these back:
 - `mode` (units, `"imperial"`/`"metric"`) → `unitsMode`; `mode` is the work mode, `"floor"`/`"panel"`
 
 Areas carry a stable `id` — pins hang off it, so pins survive an area being deleted or reordered.
-Re-saving an area must preserve its `id` and `pinned`.
+Re-saving an area must preserve its `id`, its `pinned` and its `install`.
+
+`applyAreaV2` is now **`applyAreaDefaults`** — named for the shape, not one version. It applies
+whatever `geometryDefaults()` currently says an area carries, and every migration that touches areas
+calls it, so a record migrated from v1 and one created today carry the same field set.
 
 ## Support & Backup (Jobs → 💾 Save & Support)
 

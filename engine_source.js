@@ -170,6 +170,42 @@ var ENGINES = {
     exports: ['stgInchField', 'stgAreaField', 'stgAreaRect', 'parseMeas', 'fracVal']
   },
 
+  /* The containment + install core. Two ranges, because the state it guards and
+     the functions that guard it sit either side of the whole deck/generate
+     block:
+       1. S, the mode flags, and isReadOnlyLayout()
+       2. fingerprint() through hasProgress() — everything that decides where a
+          row tick goes and whether one comes back
+
+     Sliceable at all only because Stage 4 took localStorage out of it: progress
+     now arrives through AREA.install, an adapter the job-store side supplies, so
+     the whole path is arithmetic over an injected object. That is exactly the
+     shape a harness can drive — the previous version could only be grepped.
+
+     Stops before toggleRow(), which re-renders and so touches the DOM.
+
+     The mode ACCESSORS below are test-only doors onto the flags. They duplicate
+     what the real entry points do, so on their own they could drift into
+     fiction — `test_install.js` therefore also asserts, from source, that every
+     real entry sets both flags the same way. Executable half proves the
+     mechanism; source half proves the entries reach it. */
+  install: {
+    module: 'install_core.js',
+    ranges: [
+      ['  var S = { cfg:null, cands:[]', '  function readInputs(){'],
+      ['  function fingerprint(cfg, cand){', '  function toggleRow(n){']
+    ],
+    exports: ['inSample', 'inArea', 'isReadOnlyLayout', 'fingerprint', 'installSlot',
+              'loadProgress', 'saveProgress', 'doneCount', 'currentRow', 'hasProgress'],
+    accessors: {
+      enterQuickCalc: 'function(){ sampleMode = false; areaMode = false; AREA = null; }',
+      enterSample:    'function(){ sampleMode = true;  areaMode = false; AREA = null; }',
+      enterArea:      'function(meta){ areaMode = true; sampleMode = false; AREA = meta || null; }',
+      setState:       'function(o){ Object.keys(o).forEach(function(k){ S[k] = o[k]; }); }',
+      getState:       'function(){ return S; }'
+    }
+  },
+
   // The demo rooms. Not an engine at all — a config table — but it is sliced the
   // same way for the same reason: the numbers printed on a room card must be the
   // numbers the engine actually produces, and the only way to know is to run one
@@ -238,6 +274,40 @@ function cut(html, name, startAnchor, endAnchor, idx){
   return html.slice(firstS, firstE);
 }
 
+/* Comments out, code in — for SCANNING only; the evaluated slice is always the
+   untouched source. Written as a scanner rather than a pair of regexes because
+   the shortcut versions are wrong in opposite directions: stripping /\/\/.*$/
+   also eats the tail of "https://example", and skipping any line containing a
+   quote leaves real code unscanned. Tracking whether we are inside a string is
+   what makes it exact. Division-vs-regex is not disambiguated — a regex literal
+   containing an unbalanced quote would confuse it — but no engine slice
+   contains one, and the failure mode is a false IMPURE, which is loud. */
+function stripComments(src){
+  var out = '', i = 0, n = src.length, q = null;
+  while (i < n){
+    var c = src[i], d = src[i+1];
+    if (q){
+      if (c === '\\'){ out += c + (d||''); i += 2; continue; }
+      if (c === q) q = null;
+      out += c; i++; continue;
+    }
+    if (c === '"' || c === "'" || c === '`'){ q = c; out += c; i++; continue; }
+    if (c === '/' && d === '*'){
+      var end = src.indexOf('*/', i+2);
+      i = (end < 0) ? n : end + 2;
+      out += ' ';                       // keep tokens on either side apart
+      continue;
+    }
+    if (c === '/' && d === '/'){
+      var nl = src.indexOf('\n', i);
+      i = (nl < 0) ? n : nl;            // leave the newline: line numbers hold
+      continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
 /**
  * Load an engine by name. Returns an object of its exported functions.
  * Module-first, slice-fallback.
@@ -267,8 +337,16 @@ function load(name){
   var html = readHtml();
   var src = spec.ranges.map(function(r, i){ return cut(html, name, r[0], r[1], i); }).join('\n');
 
-  if (spec.pure !== false && /document\.|window\.|localStorage/.test(src)){
-    var offending = (src.match(/^.*(?:document\.|window\.|localStorage).*$/m) || [''])[0].trim();
+  /* The purity check reads CODE, not prose. It used to scan `src` raw, which
+     meant a comment explaining that a function no longer touches localStorage
+     was itself enough to fail the slice as impure — the exact inversion of what
+     the check is for, and it would have pushed the fix toward mutilating an
+     accurate comment. Same trap `test_area.js` records for its refusal grep and
+     `test_labels.js` for its counter-rotation grep: a block that QUOTES the
+     thing it forbids matches a raw grep for it. Strip first, then scan. */
+  var scan = stripComments(src);
+  if (spec.pure !== false && /document\.|window\.|localStorage/.test(scan)){
+    var offending = (scan.match(/^.*(?:document\.|window\.|localStorage).*$/m) || [''])[0].trim();
     die(["FAIL: engine '" + name + "' now touches the DOM in index.html.",
          "      first offending line: " + offending.slice(0, 100),
          "      Extract it to a module rather than widening this harness."]);
@@ -311,4 +389,11 @@ function digest(value){
            .update(JSON.stringify(value)).digest('hex').slice(0, 16);
 }
 
-module.exports = { load: load, digest: digest, ENGINES: ENGINES };
+/* stripComments is exported because harnesses need it for exactly the reason
+   the purity check does: a block that quotes the thing it forbids — an old copy
+   line kept so nobody reinstates it, a comment explaining that a call was
+   removed — matches a raw grep for it and reports a bug that is not there.
+   `test_area.js` and `test_labels.js` both hand-rolled a strip for this; one
+   implementation is better than three that disagree at the edges. */
+module.exports = { load: load, digest: digest, ENGINES: ENGINES,
+                   stripComments: stripComments };
