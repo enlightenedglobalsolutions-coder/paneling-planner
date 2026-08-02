@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.08.02-1524';</script>
+<script>window.EGS_VERSION = '2026.08.02-1751';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -2305,6 +2305,40 @@ var FL = (function(){
   var END_PREF = 6;      // soft: preferred shortest last cut
   function eyeTol(P){ return Math.max(1.5, P * 0.05); }
 
+  /* ---- what the engine cannot lay, stated once ----------------------------
+
+     THE PRECONDITION THAT BIT. `legalStarts` searches row starts from
+     MIN_FRESH upward to P. If P < MIN_FRESH that range is EMPTY — not "hard to
+     satisfy", empty — so no row has a legal start anywhere and every fallback
+     inside pickFresh finds nothing. The over-constrained branch then did
+     `(best || bestAny).s` on two nulls and threw a TypeError on row 2.
+
+     The UI guard did not catch it because it asked a different question:
+     `plankLen <= minOff` is about whether a stagger is expressible, and a 4"
+     plank with a 3" offset passes that happily. Two separate limits, only one
+     of them checked. Both live here now, so the alert and the engine cannot
+     disagree about what is layable — the alert USED to carry its own copy of
+     the offset rule, which is how the second rule came to have no home.
+
+     Returns a reason string, or null when the config can be laid. The numbers
+     in the messages are interpolated from the constants, never written in: the
+     sentence has to stay true if MIN_FRESH moves. */
+  function unlayable(cfg){
+    if (!cfg) return "There is nothing to lay yet.";
+    if (!(cfg.runIn > 0) || !(cfg.acrossIn > 0))
+      return "Check the room dimensions — they both need to be above zero.";
+    if (!(cfg.plankLen > 0) || !(cfg.plankWid > 0))
+      return "Check the plank dimensions — they both need to be above zero.";
+    if (cfg.plankLen <= cfg.minOff)
+      return "The plank is shorter than the minimum joint offset. Lower the offset or the "
+           + "layout can't stagger.";
+    if (cfg.plankLen < MIN_FRESH)
+      return "A plank under " + MIN_FRESH + "″ can't be laid: every row would have to open "
+           + "on a piece shorter than that, which is a sliver rather than a board. Check the "
+           + "plank length — the field is the length of one board, not the width.";
+    return null;
+  }
+
   // Signed phase difference between two row starts, wrapped to (-P/2, P/2].
   function phaseStep(a, b, P){
     var d = (b - a) % P;
@@ -2509,6 +2543,18 @@ var FL = (function(){
         if (tailLen(s, runIn, P) < END_MIN - 0.001) continue;
         if (!best || sc > best.score) best = { s:s, score:sc };
       }
+      /* Both null means the loop above never ran a single iteration — the
+         MIN_FRESH..P range is empty, so there is no start to score. Not an
+         over-constrained room: a plank shorter than the minimum fresh start.
+         generateCandidates() refuses that config before reaching here, so this
+         is unreachable through the app; it is the backstop for a direct caller
+         (a harness, the L path, whatever comes next). Say WHICH impossibility
+         it is — the old `(best || bestAny).s` dereferenced null and reported
+         "cannot read properties of null", which names nothing. */
+      if (!best && !bestAny){
+        throw new Error("no legal row start exists: a " + P + "″ plank is under the "
+          + MIN_FRESH + "″ minimum fresh start, so the search range is empty.");
+      }
       return { start: (best || bestAny).s, relaxed: true };
     }
     // Randomise among the near-best, not the whole legal set — maximise distance,
@@ -2674,6 +2720,11 @@ var FL = (function(){
   // Generate every seed against both strategies, then rank. Violations and
   // relaxed rows always outrank waste — a cheap floor that looks wrong is not cheap.
   function generateCandidates(cfg){
+    /* Refuse up front rather than part-way through row 2. This cannot move a
+       golden: every fixture that lays today passes the check by definition, and
+       the only configs it stops are the ones that used to throw. */
+    var no = unlayable(cfg);
+    if (no) throw new Error(no);
     var all=[];
     SEEDS.forEach(function(sd){
       [false,true].forEach(function(guard){
@@ -3098,10 +3149,14 @@ var FL = (function(){
   function generate(cfgOverride){
     var cfg = cfgOverride || readInputs();
     if (!cfg){ alert("Check the room and plank dimensions — they all need to be above zero."); return; }
-    if (cfg.plankLen <= cfg.minOff){
-      alert("The plank is shorter than the minimum joint offset. Lower the offset or the layout can't stagger.");
-      return;
-    }
+    /* ONE source for what is layable. This used to carry its own copy of the
+       offset rule and nothing else, so the second limit — a plank shorter than
+       MIN_FRESH, which leaves the engine no legal row start at all — had no
+       home and reached the engine, where it threw a TypeError on row 2 and put
+       a white screen in front of somebody standing in a room. Ask the engine
+       what it can lay; do not keep a second opinion here. */
+    var no = unlayable(cfg);
+    if (no){ alert(no); return; }
     S.cfg = cfg;
     S.cands = orderDeck(generateCandidates(cfg));
     S.active = 0;

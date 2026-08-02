@@ -62,9 +62,13 @@ var ENGINES = {
               'phaseStep', 'stepMags', 'longestSimilarRun', 'eyeOffences', 'eyeTol',
               'rowEnd', 'shortEnds'],
     accessors: {
-      getEyeRun:  'function(){ return EYE_RUN; }',
-      getEndMin:  'function(){ return END_MIN; }',
-      getEndPref: 'function(){ return END_PREF; }'
+      getEyeRun:    'function(){ return EYE_RUN; }',
+      getEndMin:    'function(){ return END_MIN; }',
+      getEndPref:   'function(){ return END_PREF; }',
+      // The lower bound on a row start, and so on the plank itself: below it
+      // legalStarts' search range is empty. Exposed so a harness can assert the
+      // refusal message interpolates it instead of pinning a hardcoded 6.
+      getMinFresh:  'function(){ return MIN_FRESH; }'
     }
   },
 

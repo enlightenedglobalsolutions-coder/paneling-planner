@@ -440,24 +440,75 @@ FIXTURES.forEach(function(f){
 });
 
 // ===========================================================================
-console.log("\nKNOWN DEFECTS — pinned as CURRENT behaviour, not endorsed");
+console.log("\nKNOWN DEFECTS — pinned as CURRENT behaviour, not endorsed  (1 of 2 now FIXED)");
 // ===========================================================================
 // See docs/STAGGER-V3-AUDIT-2026-07-26.md. These assertions describe what the
 // engine does today. When the defect is fixed, THESE TESTS SHOULD FAIL — flip
-// them to assert the corrected behaviour at that point. That is the intent.
+// them to assert the corrected behaviour at that point. That is the intent, and
+// it has now happened once: the plank-under-MIN_FRESH crash below is FIXED and
+// its assertions have been flipped. The rip-bump defect is still pinned.
+/* FIXED 2026-08-02 — FLIPPED, as the header above always said it would be.
+
+   Was: "plank shorter than MIN_FRESH throws TypeError instead of erroring
+   cleanly." `legalStarts` searches row starts from MIN_FRESH up to P, so P < 6
+   left that range EMPTY — no legal start anywhere — and pickFresh's
+   over-constrained fallback did `(best || bestAny).s` on two nulls. The UI
+   guard missed it because it asked a different question: `plankLen <= minOff`
+   is about whether a stagger is expressible, and 4 with an offset of 3 passes
+   that happily. Two limits, one of them checked, and the gap was reachable from
+   Setup — a white screen for somebody standing in a room.
+
+   Now: `unlayable(cfg)` states both limits in one place, generateCandidates
+   refuses before it lays anything, and generate() asks it rather than keeping a
+   second opinion. These assertions describe the correction. */
 (function(){
-  // legalStarts() searches s from MIN_FRESH(6) upward, so a plank under 6"
-  // yields no candidates; the over-constrained fallback then dereferences null.
-  // The UI guard at index.html:2216 only rejects plankLen <= minOff, so
-  // plankLen 4 with minOff 3 sails past it and throws on row 2.
   var tiny = mkCfg({roomRunIn:156,roomAcrossIn:132,gap:0.25,plankLen:4,plankWid:3,
                     minOff:3,minReuse:20,minRip:2,perBox:8,rotate:4});
-  ok("KNOWN DEFECT: UI guard (plankLen <= minOff) does NOT catch plankLen 4 / minOff 3",
+
+  // The old guard's shape is kept as evidence of WHY a second rule was needed:
+  // this config really does sail past the offset test. It is the reason the
+  // check moved rather than gaining a clause in place.
+  ok("the offset rule alone still would not catch plankLen 4 / minOff 3",
      !(tiny.plankLen <= tiny.minOff));
+
   var threw=null;
   try { FL.generateCandidates(tiny); } catch(e){ threw=e; }
-  ok("KNOWN DEFECT: plank shorter than MIN_FRESH throws TypeError instead of erroring cleanly",
-     threw && threw.constructor.name==='TypeError', threw?threw.message:"did not throw");
+  ok("a plank under MIN_FRESH is refused, not crashed on",
+     threw && threw.constructor.name === 'Error', threw ? threw.constructor.name : "did not throw");
+  ok("...and it is no longer a TypeError from a null dereference",
+     threw && threw.constructor.name !== 'TypeError');
+  /* The message must carry MIN_FRESH's ACTUAL value, read from the engine —
+     not a 6 written into this file. Same rule as the deck verdict and the band
+     count: a sentence that states a number has to stay true when the number
+     moves, and a test that hardcodes it cannot tell the difference. */
+  var MF = FL.getMinFresh();
+  ok("...and the message names the limit it hit",
+     threw && new RegExp("plank under " + MF).test(threw.message),
+     threw ? threw.message.slice(0,60) : "");
+  ok("...with MIN_FRESH interpolated, so the copy tracks the constant",
+     MF === 6 ? threw.message.indexOf("6") > 0 : threw.message.indexOf(String(MF)) > 0,
+     "MIN_FRESH=" + MF);
+
+  // The two limits are separate, and each keeps its own reason.
+  var offsetBound = mkCfg({roomRunIn:156,roomAcrossIn:132,gap:0.25,plankLen:3,plankWid:3,
+                           minOff:4,minReuse:20,minRip:2,perBox:8,rotate:4});
+  var t2=null; try { FL.generateCandidates(offsetBound); } catch(e){ t2=e; }
+  ok("a plank shorter than the offset still reports the offset rule",
+     t2 && /minimum joint offset/.test(t2.message), t2 ? t2.message.slice(0,50) : "did not throw");
+
+  // The boundary is exactly MIN_FRESH: 6 lays, 5.5 does not. A fix that moved
+  // the boundary would be refusing floors that lay today.
+  function atLen(P){
+    var c = mkCfg({roomRunIn:156,roomAcrossIn:132,gap:0.25,plankLen:P,plankWid:9,
+                   minOff:1,minReuse:20,minRip:2,perBox:8,rotate:4});
+    try { FL.generateCandidates(c); return true; } catch(e){ return false; }
+  }
+  ok("a 6″ plank still lays — the boundary did not move inward", atLen(6));
+  ok("...and 5.5″ does not", !atLen(5.5));
+
+  // Nothing that lays today may start refusing. The room fixtures are the real
+  // proof (every golden above still passes), this is the explicit statement.
+  ok("a normal room is untouched by the new check", atLen(60));
 })();
 (function(){
   // The rip bump adds ONE row and re-computes edge, with no re-check. If one
