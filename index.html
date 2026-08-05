@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.08.02-1751';</script>
+<script>window.EGS_VERSION = '2026.08.04-1902';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -1046,7 +1046,219 @@ function auditLayout(trusses,runIn,capIn,rowJoints){
   return {adjShare:adjShare, twoBackOver:twoBackOver, adjOneBay:adjOneBay, illegal:illegal, cluster:cluster};
 }
 
+/* ===========================================================================
+   GENERATOR ROUND 2 — the five rules, from the Aug 4 2026 spec.
+
+   WHERE THESE CAME FROM. A real pine ceiling: run 261.75″ (21′-9¾″), trusses
+   24″ o.c. first at 18″, 12′ stock, 29 rows. The generator produced a layout
+   that cycled, Edwin caught it on the ceiling, and rescued it by hand. Both the
+   app's output and the hand rescue are pinned in `test_generator2.js`, and every
+   checker below is calibrated against BOTH: it must reject the first and accept
+   the second. A rule that cannot tell them apart is not doing anything.
+
+   WHY layoutPeriod() DID NOT CATCH IT — read this before trusting it again. It
+   asks for a WHOLE-SEQUENCE period: s[k] === s[k-p] for every k. The real
+   failure was INTERLEAVED — from row I every second row was the identical
+   two-piece row {5}, while the odd rows cycled a six-row pool. No single p
+   describes that, so layoutPeriod returned a large number and the layout scored
+   as varied. Rule 4 below asks the question that actually catches it: has this
+   exact row appeared in the last five, whatever the rows in between did.
+
+   These are pure. They take truss INDICES (the same 1..nT-2 the rest of the
+   engine speaks) and are used at GENERATION time — the spec is explicit that
+   filtering candidates is the point, and that a post-hoc audit which merely
+   reports a cycling ceiling is what shipped last time.
+   =========================================================================== */
+
+/* RULE 1 — VOCABULARY. A middle piece spans from one joint to the next, so its
+   length is (truss index difference) × o.c. Legal middles are every o.c.
+   multiple from 2 bays up to the stock length: at 24″ o.c. with 12′ stock that
+   is 48/72/96/120/144.
+
+   The shipped generator's middles were only {48,120}. Not because the candidate
+   pool lacked the others — candidateRows enumerates all of them — but because
+   the downstream preference stack (starvation scoring, then the 42″ short-end
+   tie-break) kept landing on the same two shapes. So this is a rule about what
+   the WALK reaches for, not about what exists. `vocabOf` reports what a layout
+   actually used, which is the measurement that made the diagnosis possible. */
+function midVocabulary(ocIn, stockIn){
+  var out=[]; for(var m=2*ocIn; m<=stockIn+0.01; m+=ocIn) out.push(Math.round(m*100)/100);
+  return out;
+}
+function rowMiddles(trusses, row, runIn){
+  var s = segLengths(trusses, row, runIn);
+  return s.slice(1, -1);                       // drop the two end pieces
+}
+function vocabOf(trusses, rowJoints, runIn){
+  var seen={};
+  rowJoints.forEach(function(row){
+    rowMiddles(trusses,row,runIn).forEach(function(m){ seen[m]=(seen[m]||0)+1; });
+  });
+  return seen;
+}
+
+/* RULE 2 — TRUSS EXCLUSION. A joint may not sit on a truss carrying a joint in
+   either of the previous two rows. HARD. Three rows apart is preferred but only
+   preferred: the hand rescue breaches 3-row separation seven times, so anything
+   stricter than two would reject the layout that must pass.
+
+   `prevRows` is what makes this work across the INSTALLED boundary. The real job
+   had rows F/G/H already on the ceiling, and a generator that starts its window
+   at its own row 0 will happily reuse a truss from the last installed row —
+   which is a seam you can see from the floor and cannot undo. */
+function trussConflicts(row, priorRows){
+  var used={};
+  priorRows.forEach(function(p){ (p||[]).forEach(function(t){ used[t]=1; }); });
+  return row.filter(function(t){ return used[t]; });
+}
+function rule2Violations(rowJoints, prevRows){
+  var all=(prevRows||[]).concat(rowJoints), base=(prevRows||[]).length, out=[];
+  for(var i=base;i<all.length;i++){
+    var hit=trussConflicts(all[i], [all[i-1], all[i-2]].filter(Boolean));
+    if(hit.length) out.push({row:i-base, trusses:hit});
+  }
+  return out;
+}
+// The soft half, reported separately so ranking can prefer it without the
+// builder ever treating it as legality.
+function rule2SoftBreaches(rowJoints, prevRows){
+  var all=(prevRows||[]).concat(rowJoints), base=(prevRows||[]).length, n=0;
+  for(var i=base;i<all.length;i++){
+    if(i-3>=0 && trussConflicts(all[i], [all[i-3]]).length) n++;
+  }
+  return n;
+}
+
+/* RULE 3 — STAIRCASE BAN. Three consecutive rows must not complete a joint
+   marching one truss per row: p, p±24″, p±48″. Either direction.
+
+   IT IS STEP-24 ONLY, AND THAT IS MEASURED, NOT ASSUMED. Reading it to also ban
+   a two-truss-per-row march (p, p±48″, p±96″) rejects the hand rescue seven
+   times over — J→K→L is t3→t5→t7. The fixture that must pass decides the
+   reading; see `test_generator2.js`, which pins both directions of that finding
+   so the stricter reading cannot creep back in. */
+function rule3Violations(rowJoints, prevRows){
+  var all=(prevRows||[]).concat(rowJoints), base=(prevRows||[]).length, out=[];
+  for(var i=Math.max(2,base);i<all.length;i++){
+    all[i-2].forEach(function(p){
+      [1,-1].forEach(function(d){
+        if(all[i-1].indexOf(p+d)>=0 && all[i].indexOf(p+2*d)>=0)
+          out.push({row:i-base, run:[p,p+d,p+2*d]});
+      });
+    });
+  }
+  return out;
+}
+// Would adding `row` at position i complete a staircase? The generation-time
+// question, asked of a candidate before it is ever placed.
+function completesStaircase(row, prev, back){
+  if(!prev || !back || !prev.length || !back.length) return false;
+  for(var a=0;a<back.length;a++){
+    for(var d=-1;d<=1;d+=2){
+      if(prev.indexOf(back[a]+d)>=0 && row.indexOf(back[a]+2*d)>=0) return true;
+    }
+  }
+  return false;
+}
+
+/* RULE 4 — SIGNATURE SPACING. An identical row makeup never recurs within five
+   rows. HARD, and it is the rule layoutPeriod could not express.
+
+   The echo half is SOFT and must stay soft: the hand rescue has three trusses
+   recurring on a fixed four-row rhythm (t3, t5, t7). A hard echo rule would
+   reject it. It returns a count for the ranking to prefer against — "rescore",
+   in the spec's words, not "reject". */
+var SIG_WINDOW = 5;
+function rule4Violations(rowJoints, prevRows){
+  var all=(prevRows||[]).concat(rowJoints), base=(prevRows||[]).length, out=[];
+  for(var i=base;i<all.length;i++){
+    for(var d=1;d<=SIG_WINDOW;d++){
+      if(i-d>=0 && key(all[i])===key(all[i-d])) out.push({row:i-base, echoOf:i-base-d});
+    }
+  }
+  return out;
+}
+function rule4Echoes(rowJoints){
+  var pos={}, n=0;
+  rowJoints.forEach(function(row,i){ row.forEach(function(t){ (pos[t]=pos[t]||[]).push(i); }); });
+  Object.keys(pos).forEach(function(t){
+    var ix=pos[t], gaps={};
+    for(var a=1;a<ix.length;a++){ var g=ix[a]-ix[a-1]; gaps[g]=(gaps[g]||0)+1; }
+    Object.keys(gaps).forEach(function(g){ if(gaps[g]>=3) n++; });
+  });
+  return n;
+}
+
+/* RULE 5 — FORCED-ROW CAP. Some run lengths admit exactly one legal two-piece
+   row. Here a single joint j needs j <= stock AND runIn - j <= stock, which on
+   261.75″ with 144″ stock leaves only t5 (138″ + 123.75″). That row is legal,
+   and it is also the single most recognisable thing on the ceiling, so it must
+   be rationed: roughly one in eight. The shipped layout used it eight times in
+   twenty-nine, every second row for a stretch — which IS the cycle. */
+function forcedRows(trusses, runIn, stockIn){
+  var out=[];
+  for(var i=1;i<=trusses.length-2;i++){
+    if(trusses[i] <= stockIn+0.5 && (runIn-trusses[i]) <= stockIn+0.5) out.push(i);
+  }
+  return out;
+}
+function forcedRowCap(rows){ return Math.max(1, Math.round(rows/8)); }
+
+/* THE CAP IS CONDITIONAL ON THERE BEING EXACTLY ONE, and that is the whole
+   point of the rule rather than a detail of it. The spec's wording is "when row
+   length makes exactly ONE 2-piece row possible" — on 261.75″ with 144″ stock
+   that is t5 alone, so every two-piece row on that ceiling is the same
+   unmistakable 138″+123.75″ and rationing it is what stops the cycle.
+
+   A first cut of this rationed EVERY single-joint row unconditionally, which is
+   wrong and the sweep caught it: on a 180″ run FIVE different two-piece rows are
+   legal, so they are a family rather than a signature, and capping them at 2 of
+   16 rejected layouts that repeat nothing at all. Where more than one exists,
+   rules 2 and 4 already stop any single one recurring, and this rule stands
+   down. `appliesTo` returns the single forced index, or null. */
+function forcedSignature(trusses, runIn, stockIn){
+  var f = forcedRows(trusses, runIn, stockIn);
+  return f.length===1 ? f[0] : null;
+}
+function countForced(rowJoints, sig){
+  if (sig == null) return 0;                 // no single signature -> nothing to ration
+  return rowJoints.filter(function(r){ return r.length===1 && r[0]===sig; }).length;
+}
+
+/* The whole spec in one call, for the auditor and the harness. `prevRows` is
+   the installed courses; omit it for a fresh ceiling. */
+function checkFiveRules(trusses, runIn, stockIn, rowJoints, prevRows, ocIn){
+  var oc = ocIn || (trusses.length>1 ? Math.round((trusses[1]-trusses[0])*100)/100 : 24);
+  var vocab = vocabOf(trusses, rowJoints, runIn);
+  var legal = midVocabulary(oc, stockIn);
+  var illegalMid = Object.keys(vocab).filter(function(m){ return legal.indexOf(+m)<0; });
+  return {
+    vocabUsed:   Object.keys(vocab).map(Number).sort(function(a,b){return a-b;}),
+    vocabLegal:  legal,
+    illegalMid:  illegalMid.map(Number),
+    r2:          rule2Violations(rowJoints, prevRows),
+    r2soft:      rule2SoftBreaches(rowJoints, prevRows),
+    r3:          rule3Violations(rowJoints, prevRows),
+    r4:          rule4Violations(rowJoints, prevRows),
+    r4echo:      rule4Echoes(rowJoints),
+    forcedSig:   forcedSignature(trusses, runIn, stockIn),
+    forced:      countForced(rowJoints, forcedSignature(trusses, runIn, stockIn)),
+    // With no single forced row there is nothing to ration, so the cap is the
+    // row count — satisfied by construction, and visibly so rather than by the
+    // check being skipped somewhere the reader cannot see.
+    forcedCap:   (forcedSignature(trusses, runIn, stockIn)==null)
+                   ? rowJoints.length : forcedRowCap(rowJoints.length)
+  };
+}
+// One boolean, so a label that claims "non-repeating" has something to be
+// earned against rather than asserted.
+function passesFiveRules(chk){
+  return chk.illegalMid.length===0 && chk.r2.length===0 && chk.r3.length===0
+      && chk.r4.length===0 && chk.forced<=chk.forcedCap;
+}
+
 // Shortest cycle the row sequence repeats on — small period = visible pattern.
+// KEPT, but it is not sufficient on its own: see the interleaving note above.
 function layoutPeriod(rowJoints){
   var s=rowJoints.map(key);
   for(var p=1;p<=Math.floor(s.length/2);p++){
@@ -1057,106 +1269,257 @@ function layoutPeriod(rowJoints){
   return s.length;
 }
 
-// Walk the ceiling one row at a time. Each row is filtered against the seam
-// rules, then chosen randomly among the best-spaced survivors — random within
-// the rules, so it reads as laid by a careful carpenter, not by a formula.
-function buildPanelLayout(seed,trusses,runIn,capIn,rows,cands){
+/* Walk the ceiling one row at a time, against the five rules of the Aug 4 spec.
+
+   WHAT CHANGED, AND WHY THE OLD ONE CYCLED. The previous walk filtered on two
+   hard rules (no truss shared with the row above; at most ONE shared with the
+   row two above) and then chose from a preference stack — starvation scoring,
+   then a 42" short-end tie-break. Both of those preferences are attractors: they
+   pull toward the same handful of row shapes, and with only a soft "don't repeat
+   the last three" to stop it, the walk settled into an interleaved cycle that
+   layoutPeriod could not see. It shipped a ceiling that repeated every second
+   row.
+
+   THE HARD RULES ARE NOW HARD, AND THE WALK BACKTRACKS RATHER THAN RELAXING.
+   That is the structural change. `sharedTrusses(c,back)>1` allowed a joint to
+   land on a truss used two rows up so long as only one did; rule 2 forbids any.
+   Tightening it means a greedy walk can paint itself into a corner, and the old
+   answer to a corner was to relax the rules and carry on — which is how a
+   violation reaches a ceiling. This one searches: depth-first with a node
+   budget, ordered by the soft preferences and randomised within them, and it
+   backs up when a row has no legal successor. Relaxation is what happens after
+   the search is exhausted, and it is reported.
+
+   `opts.prevRows` is the courses already installed. The real job had three, and
+   a walk that starts its window at its own row 0 will reuse a truss from the
+   last installed course — a seam you can see from the floor and cannot undo. */
+function buildPanelLayout(seed,trusses,runIn,capIn,rows,cands,opts){
+  opts = opts || {};
+  var prevRows = opts.prevRows || [];
+  var stockIn  = opts.stockIn || capIn;
+  var oc       = (trusses.length>1) ? Math.round((trusses[1]-trusses[0])*100)/100 : 24;
   var st=(seed>>>0)||1;
   function rnd(){ st=(st*1103515245+12345)&0x7fffffff; return st/0x7fffffff; }
-  var nT=trusses.length;
-  var out=[], relaxedRows=0, lastUsed={};
 
-  for(var r=0;r<rows;r++){
-    var prev=r>0?out[r-1]:null, back=r>1?out[r-2]:null;
-    var recent=out.slice(-3).map(key);
+  var VOCAB = midVocabulary(oc, stockIn);
+  // The single forced two-piece row, or null when the run admits more than one
+  // — see forcedSignature(). Rationing a family rather than a signature is a
+  // bug the seed sweep caught on a 180" run.
+  var FORCED_SIG = forcedSignature(trusses, runIn, stockIn);
+  function isForced(c){ return FORCED_SIG!=null && c.length===1 && c[0]===FORCED_SIG; }
+  // The ration, as a running pace rather than a total: checking only at the end
+  // would let the walk spend every forced row in the first third and then
+  // discover it has none left, which is the cycle in a different costume.
+  function forcedAllowedBy(r){ return Math.max(1, Math.round((r+1)/8)); }
 
-    function filt(minGap){
-      return cands.filter(function(c){
-        if(prev){
-          if(sharedTrusses(c,prev)>0) return false;          // HARD: no shared truss
-          if(minGapBetween(c,prev)<minGap) return false;     // PREF 2 / HARD 1
-        }
-        if(back && sharedTrusses(c,back)>1) return false;    // HARD: cap 1 shared
-        return true;
-      });
-    }
-
-    var pool=filt(2), relaxed=false;
-    if(!pool.length){ pool=filt(1); relaxed=true; }
-    if(!pool.length){ pool=cands.slice(); relaxed=true; }    // over-constrained; audit will say so
-
-    // Don't repeat a row used in the last three, if there's any alternative.
-    var novel=pool.filter(function(c){ return recent.indexOf(key(c))<0; });
-    if(novel.length) pool=novel;
-
-    // Parity escape. At 24\u2033 o.c. the >=2-truss rule has a trap: a row whose
-    // joints all sit on one parity with even spacing ({1,5,9}) forces every
-    // legal successor onto that same parity, and the other half of the truss
-    // field never takes a seam. Edwin's own pre-cut method dodges it without
-    // knowing \u2014 first piece + 10\u2032 boards is a FIVE-bay step, odd, so his rows
-    // straddle both parities. Prefer rows that do the same.
-    var mixed=pool.filter(function(c){
-      if(c.length<2) return true;
-      var par=c[0]%2;
-      for(var q=1;q<c.length;q++){ if(c[q]%2!==par) return true; }
-      return false;
-    });
-    if(mixed.length) pool=mixed;
-
-    // Anti-diagonal. A fixed sweep direction \u2014 each row's first joint stepping
-    // the same way \u2014 draws a straight line your eye locks onto (the tell in the
-    // uniform pattern). If the last two rows swept one direction, forbid a third
-    // row continuing it; force the sweep to reverse. Breaks the diagonal every
-    // row without imposing a wave of its own.
-    if(prev && back && prev.length && back.length){
-      var lastDir = Math.sign(prev[0]-back[0]);
-      if(lastDir!==0){
-        var anti=pool.filter(function(c){
-          if(!c.length) return true;
-          return Math.sign(c[0]-prev[0]) !== lastDir;
-        });
-        if(anti.length) pool=anti;
-      }
-    }
-
-    // Uniform DENSITY, not scatter: joints sweep across the ceiling so every
-    // area takes its share and none collects a cluster (Edwin's pre-cut sketch
-    // \u2014 first pieces walking 3\u2032-6, 5\u2032-6, 7\u2032-6, 9\u2032-8, 11\u2032-6 across the run).
-    // Score by how long a candidate's exact trusses have gone unused: the row
-    // is drawn toward the trusses that are being starved.
-    var scored=pool.map(function(c){
-      var s=1e9;
-      c.forEach(function(t){
-        var lu=lastUsed[t];
-        var age=(lu==null)?99:(r-lu);
-        if(age<s) s=age;
-      });
-      return {c:c, s:s};
-    });
-    scored.sort(function(a,b){ return b.s-a.s; });
-    var top=scored[0].s;
-    var band=scored.filter(function(x){ return x.s>=top-1; });
-    if(!band.length) band=scored;
-
-    // Offcut-consumption bias: among the equally well-placed rows, favour ones
-    // whose FIRST piece is a short end near 3\u2032-6 (42\u2033). Those seams turn leftover
-    // stubs into used material instead of forcing a fresh cut mid-board \u2014 Edwin's
-    // "the left could use a couple joins at the 3\u20326" note. Never overrides
-    // coverage, only breaks ties within the top band.
-    var SHORT_END=42, TOL=8;
-    var shortEnders=band.filter(function(x){
-      if(!x.c.length) return false;
-      var firstSeg=trusses[x.c[0]];   // wall(0)->first joint = first piece length
-      return Math.abs(firstSeg-SHORT_END)<=TOL;
-    });
-    var choiceSet = shortEnders.length ? shortEnders : band;
-    var choice=choiceSet[Math.floor(rnd()*choiceSet.length)].c;
-
-    if(relaxed) relaxedRows++;
-    choice.forEach(function(t){ lastUsed[t]=r; });
-    out.push(choice);
+  // ---- HARD: the rules a row must satisfy to be placed at all -------------
+  function legalAt(c, seq){
+    var i = seq.length;                       // index within seq (incl. prevRows)
+    var prev = i>0 ? seq[i-1] : null;
+    var back = i>1 ? seq[i-2] : null;
+    // R2 — no joint on a truss carrying one in either of the previous two rows.
+    if (prev && sharedTrusses(c, prev)>0) return false;
+    if (back && sharedTrusses(c, back)>0) return false;
+    // R3 — never complete a joint marching one truss per row across three rows.
+    if (completesStaircase(c, prev, back)) return false;
+    // R4 — an identical row makeup never recurs within SIG_WINDOW rows.
+    var k = key(c);
+    for (var d=1; d<=SIG_WINDOW && i-d>=0; d++){ if (key(seq[i-d])===k) return false; }
+    return true;
   }
-  return {rowJoints:out, relaxedRows:relaxedRows};
+
+  // ---- SOFT: what to reach for among the legal ---------------------------
+  /* Every term here exists because of something the old walk did wrong.
+
+     vocabReach is the direct answer to rule 1. The candidate pool always held
+     all five middle lengths; the walk simply never reached for them, so the
+     ceiling was built from 48s and 120s. Scoring a row by how UNDER-USED its
+     middles are pulls the whole vocabulary into play without ever making a
+     length mandatory.
+
+     starve keeps the old walk's one good idea: joints drift toward the trusses
+     that have gone longest without one, so no part of the field collects a
+     cluster and no part is starved.
+
+     sep3 and echo are the soft halves of rules 2 and 4 — preferred, never
+     required, because the hand rescue breaches both and it is the layout that
+     must pass.
+
+     The old anti-diagonal filter is GONE: rule 3 is the sharper statement of
+     the same worry, and it is hard rather than a preference. The 42" short-end
+     tie-break is gone too — it was a strong attractor toward one row shape and
+     it is a material-efficiency idea, which belongs in stock assignment, not in
+     the decision about where a seam is visible. */
+  function score(c, seq, midUse, lastUsed, r, forcedUsed){
+    var i = seq.length;
+    var s = 0;
+
+    var mids = rowMiddles(trusses, c, runIn);
+    var reach = 0;
+    mids.forEach(function(m){ reach += 1/(1+(midUse[m]||0)); });
+    if (mids.length) reach /= mids.length;
+    s += reach * 4.0;                                    // R1 vocabulary reach
+
+    var starve = 1e9;
+    c.forEach(function(t){
+      var lu = lastUsed[t], age = (lu==null) ? 99 : (r-lu);
+      if (age < starve) starve = age;
+    });
+    if (starve === 1e9) starve = 99;
+    s += Math.min(starve, 8) * 0.35;                     // spread across the field
+
+    if (i-3>=0 && sharedTrusses(c, seq[i-3])===0) s += 0.8;   // R2 prefer 3+
+
+    /* The one-bay preference, KEPT FROM THE OLD WALK. The five rules say nothing
+       about it, and dropping it was a real regression the panel goldens caught:
+       `oneBay` went 0 -> 17 and `cluster` 28 -> 87 on the ceiling fixture. Two
+       joints one bay apart in adjacent rows are legal under rule 2 — different
+       trusses — but 24" apart reads as a near-miss alignment from the floor, and
+       a spec that does not mention a quality the old engine achieved is not a
+       licence to lose it.
+
+       SOFT, not hard, and that is the difference from the old engine: there it
+       was a filter that emptied the pool and triggered relaxation. Scored, the
+       search can spend it where the geometry is tight instead of giving up a
+       hard rule to buy it. */
+    var pv = i>0 ? seq[i-1] : null;
+    if (pv && pv.length && minGapBetween(c, pv) >= 2) s += 0.9;
+
+    // Cluster: joints within one bay of anything in the last three rows. Legal,
+    // and it reads as a knot. The same measure auditLayout has always reported.
+    var knot=0;
+    for (var w=1; w<=3 && i-w>=0; w++){
+      c.forEach(function(t){ seq[i-w].forEach(function(u){ if(Math.abs(t-u)<=1) knot++; }); });
+    }
+    s -= knot * 0.45;
+
+    // R4 soft: discourage a truss that would land on a rhythm it is already
+    // keeping. Cheap proxy — the exact same gap twice already.
+    var echoPen = 0;
+    c.forEach(function(t){
+      var last=-1, prevGap=-1;
+      for (var q=0;q<seq.length;q++){
+        if (seq[q].indexOf(t)>=0){ if(last>=0){ var g=q-last; if(g===prevGap) echoPen+=1; prevGap=g; } last=q; }
+      }
+      if (last>=0 && prevGap>0 && (i-last)===prevGap) echoPen += 1;
+    });
+    s -= echoPen * 0.5;
+
+    // Parity mix. At 24" o.c. a row whose joints all sit on one parity with even
+    // spacing forces its successors onto that parity and half the truss field
+    // never takes a seam. Kept from the old walk, which had it right.
+    if (c.length>1){
+      var par=c[0]%2, mixed=false;
+      for (var q2=1;q2<c.length;q2++) if (c[q2]%2!==par) mixed=true;
+      if (mixed) s += 0.5;
+    }
+
+    // R5: the forced row is legal and unmistakable. Discourage it well before
+    // the ration runs out, so the walk does not have to be rescued by the cap.
+    if (isForced(c)) s -= 1.5 + 2.5 * (forcedUsed / Math.max(1, forcedAllowedBy(r)));
+
+    return s;
+  }
+
+  // ---- the search ---------------------------------------------------------
+  // Depth-first, best-first within a randomised band, bounded so a hostile
+  // geometry cannot hang a phone. Returns null if the budget runs out.
+  var BUDGET = 40000;
+  function search(){
+    var nodes = 0;
+    var seq = prevRows.slice();               // placed rows, incl. installed
+    var chosen = [];                          // just this layout's rows
+    var order = [];                           // per-depth candidate queues
+    var midUse = {}, lastUsed = {}, forcedUsed = 0;
+
+    function orderFor(r){
+      var legal = cands.filter(function(c){ return legalAt(c, seq); });
+      if (isForcedOver(r)) {
+        var noForced = legal.filter(function(c){ return !isForced(c); });
+        if (noForced.length) legal = noForced;   // ration first, only if it leaves options
+      }
+      /* TIERED, not merely scored. A scalar bonus for two-bay separation was
+         measurably too weak against the hard rules — it moved `oneBay` on the
+         ceiling fixture from 17 to 15 where the old engine achieved 0. Ordering
+         every well-separated candidate ahead of every near-miss one recovers the
+         old engine's behaviour, and because the search BACKTRACKS the near-miss
+         tier is still reachable: this buys separation where the geometry allows
+         it and gives it up where it does not, which is exactly what a preference
+         should do. The old engine had this as a filter, so a tight row emptied
+         the pool and relaxed a HARD rule to escape. */
+      function tier(c){
+        var pv = seq.length ? seq[seq.length-1] : null;
+        return (pv && pv.length && minGapBetween(c, pv) < 2) ? 1 : 0;
+      }
+      var scored = legal.map(function(c){
+        return { c:c, t: tier(c), s: score(c, seq, midUse, lastUsed, r, forcedUsed) + rnd()*0.35 };
+      });
+      scored.sort(function(a,b){ return (a.t - b.t) || (b.s - a.s); });
+      return scored.map(function(x){ return x.c; });
+    }
+    function isForcedOver(r){ return forcedUsed >= forcedAllowedBy(r); }
+
+    function place(c, r){
+      seq.push(c); chosen.push(c);
+      rowMiddles(trusses,c,runIn).forEach(function(m){ midUse[m]=(midUse[m]||0)+1; });
+      c.forEach(function(t){ lastUsed[t]=r; });
+      if (isForced(c)) forcedUsed++;
+    }
+    function unplace(c, r){
+      seq.pop(); chosen.pop();
+      rowMiddles(trusses,c,runIn).forEach(function(m){ midUse[m]--; });
+      c.forEach(function(t){ delete lastUsed[t]; });
+      // lastUsed is rebuilt rather than restored: a truss may have been used
+      // earlier too, and deleting would lose that. Cheap at these depths.
+      for (var q=0;q<chosen.length;q++) chosen[q].forEach(function(t){ lastUsed[t]=q; });
+      if (isForced(c)) forcedUsed--;
+    }
+
+    order[0] = orderFor(0);
+    var r = 0;
+    while (r >= 0 && r < rows){
+      if (++nodes > BUDGET) return null;
+      var q = order[r];
+      if (!q || !q.length){                    // dead end — back up
+        r--;
+        if (r < 0) return null;
+        unplace(chosen[chosen.length-1], r);
+        continue;
+      }
+      var c = q.shift();
+      place(c, r);
+      r++;
+      if (r < rows) order[r] = orderFor(r);
+    }
+    return (r >= rows) ? chosen.slice() : null;
+  }
+
+  var found = search();
+  if (found) return { rowJoints: found, relaxedRows: 0, relaxed: false };
+
+  /* Exhausted. The geometry genuinely cannot carry the full rule set — say so
+     and hand back the best relaxed walk rather than pretending, and let the
+     ranking bury it. Relaxation order is deliberate: rule 2's two-row exclusion
+     is the one a person standing on the floor actually sees, so it is the LAST
+     thing given up, not the first. */
+  var out=[], relaxedRows=0, seq2=prevRows.slice(), lastUsed2={};
+  for (var rr=0; rr<rows; rr++){
+    var tiers = [
+      function(c){ return legalAt(c, seq2); },
+      function(c){ var i=seq2.length, p=i>0?seq2[i-1]:null, b=i>1?seq2[i-2]:null;
+                   return (!p||sharedTrusses(c,p)===0) && (!b||sharedTrusses(c,b)===0); },
+      function(c){ var i=seq2.length, p=i>0?seq2[i-1]:null;
+                   return !p || sharedTrusses(c,p)===0; },
+      function(){ return true; }
+    ];
+    var poolR=[], t=0;
+    for (; t<tiers.length; t++){ poolR = cands.filter(tiers[t]); if (poolR.length) break; }
+    if (t>0) relaxedRows++;
+    var pick = poolR[Math.floor(rnd()*poolR.length)];
+    seq2.push(pick); out.push(pick);
+    pick.forEach(function(x){ lastUsed2[x]=rr; });
+  }
+  return { rowJoints: out, relaxedRows: relaxedRows, relaxed: true };
 }
 
 // Stats keep v5's field names so every consumer still reads them; `stacked`
@@ -1171,7 +1534,15 @@ function optionStats(trusses,runIn,capIn,rowJoints){
 }
 
 // ---- top level: the 6 best distinct full layouts ----
-function generateOptions(trusses,runIn,capIn,rows){
+/* `opts.prevRows` — the courses already on the ceiling, as truss-index arrays.
+   Optional, and absent means a fresh ceiling, so every existing caller is
+   unchanged. It exists because the failure this rebuild answers was found
+   MID-JOB: three courses were installed, and a generator whose rule window
+   starts at its own row 0 will happily put a joint on the same truss as the
+   last installed course. That is a seam you can see from the floor and cannot
+   undo. */
+function generateOptions(trusses,runIn,capIn,rows,opts){
+  var prevRows = (opts && opts.prevRows) ? opts.prevRows : [];
   if(jointCount(runIn,capIn)===0){
     var blank=[]; for(var r=0;r<rows;r++)blank.push([]);
     return [{rowJoints:blank,unit:[[]],unitRows:1,label:"jointless (full boards)",
@@ -1206,43 +1577,80 @@ function generateOptions(trusses,runIn,capIn,rows){
 
   var built=[];
   for(var sd=1; sd<=40; sd++){
-    var L=buildPanelLayout(sd*7919, trusses,runIn,capIn,rows,cands);
+    var L=buildPanelLayout(sd*7919, trusses,runIn,capIn,rows,cands,
+                           {stockIn:capIn, prevRows:prevRows});
     var a=auditLayout(trusses,runIn,capIn,L.rowJoints);
+    /* The five rules, re-measured on the finished layout by the same checkers
+       the builder filtered with. The builder's own bookkeeping does not get a
+       vote — a rule enforced during the walk AND re-checked here cannot be
+       quietly lost to a scoring bug, which is the principle auditLayout has
+       always applied to the seam rules. */
+    var chk=checkFiveRules(trusses,runIn,capIn,L.rowJoints,prevRows);
     built.push({rowJoints:L.rowJoints, relaxed:L.relaxedRows,
                 adjShare:a.adjShare, twoBackOver:a.twoBackOver, illegal:a.illegal,
                 oneBay:a.adjOneBay, cluster:a.cluster, period:layoutPeriod(L.rowJoints),
+                chk:chk, clean:passesFiveRules(chk),
+                breaks:chk.illegalMid.length + chk.r2.length + chk.r3.length + chk.r4.length
+                       + Math.max(0, chk.forced - chk.forcedCap),
+                vocab:chk.vocabUsed.length,
+                soft:chk.r2soft + chk.r4echo,
                 fkey:L.rowJoints.map(key).join("|")});
   }
-  // Hard-rule failures rank last, always; relaxed rows next; then the least
-  // repetitive; then one-bay pairs (the preference); then coverage.
   built.forEach(function(b){
     var used={}; b.rowJoints.forEach(function(j){ j.forEach(function(x){ used[x]=1; }); });
     b.coverage=Object.keys(used).length;
   });
+  /* Ranking, round 2. The five rules come first and as ONE count, because a
+     layout that breaks any of them is not competing for "best" — it is
+     competing for "least bad", which is a different question and only arises
+     when the geometry cannot carry the rules at all.
+
+     Vocabulary breadth ranks above the old cost measures on purpose: reaching
+     only two of five middle lengths is exactly what the shipped generator did,
+     and not one downstream measure noticed. `period` is kept but DEMOTED — it
+     is a backstop now, not the repeat detector, because it cannot see the
+     interleaved cycle that caused this rebuild. */
   built.sort(function(x,y){
-    var hx=x.adjShare+x.twoBackOver+x.illegal, hy=y.adjShare+y.twoBackOver+y.illegal;
-    if(hx!==hy) return hx-hy;
-    if(x.relaxed!==y.relaxed) return x.relaxed-y.relaxed;
+    if(x.breaks!==y.breaks) return x.breaks-y.breaks;          // the five rules
+    if(x.relaxed!==y.relaxed) return x.relaxed-y.relaxed;      // search exhausted
+    if(x.vocab!==y.vocab) return y.vocab-x.vocab;              // R1 reach
+    if(x.soft!==y.soft) return x.soft-y.soft;                  // R2/R4 soft halves
     if(x.cluster!==y.cluster) return x.cluster-y.cluster;
-    if(x.period!==y.period) return y.period-x.period;
     if(x.oneBay!==y.oneBay) return x.oneBay-y.oneBay;
+    if(x.period!==y.period) return y.period-x.period;
     return y.coverage-x.coverage;
   });
-  // A layout can win on clusters and still cycle — a 7-row repeat over 17 rows
-  // reads as a pattern. Prefer full-period layouts; fall back only if the
-  // six can't be filled without them.
   var seen={}, picked=[];
-  var minPeriod = Math.ceil(rows/2)+1;
+  // Distinct layouts that pass everything first; fall back only if six clean
+  // ones do not exist — and then the label says so rather than hiding it.
   for(var i=0;i<built.length && picked.length<6;i++){
-    if(built[i].period>=minPeriod && !seen[built[i].fkey]){ seen[built[i].fkey]=1; picked.push(built[i]); }
+    if(built[i].clean && !seen[built[i].fkey]){ seen[built[i].fkey]=1; picked.push(built[i]); }
   }
   for(var i2=0;i2<built.length && picked.length<6;i2++){
     if(!seen[built[i2].fkey]){ seen[built[i2].fkey]=1; picked.push(built[i2]); }
   }
   return picked.map(function(p,ix){
     var suffix=String.fromCharCode(65+ix);
-    var lbl="stagger \u00b7 "+suffix + (p.relaxed?" \u00b7 "+p.relaxed+" row(s) relaxed":"");
+    /* THE LABEL IS EARNED. The spec is explicit that "non-repeating stagger"
+       must be backed by the checks rather than asserted — and the old label read
+       "stagger · A" over a ceiling that repeated every second row. A layout
+       that fails something names what it failed, in the words someone on a
+       ladder would use. */
+    var lbl;
+    if (p.clean){
+      lbl = "non-repeating stagger · "+suffix;
+    } else {
+      var why=[];
+      if (p.chk.r2.length) why.push(p.chk.r2.length+" seam(s) too close");
+      if (p.chk.r3.length) why.push(p.chk.r3.length+" stepped run(s)");
+      if (p.chk.r4.length) why.push(p.chk.r4.length+" repeated row(s)");
+      if (p.chk.forced>p.chk.forcedCap) why.push(p.chk.forced+" two-piece rows");
+      if (p.chk.illegalMid.length) why.push("off-truss piece");
+      lbl = "stagger · "+suffix+" — "+(why.join(", ") || "check the layout");
+    }
+    if (p.relaxed) lbl += " · "+p.relaxed+" row(s) relaxed";
     return {rowJoints:p.rowJoints, unit:p.rowJoints, unitRows:1, label:lbl,
+            clean:p.clean, rules:p.chk,
             stats:optionStats(trusses,runIn,capIn,p.rowJoints)};
   });
 }

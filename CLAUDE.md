@@ -1,3 +1,7 @@
+> **Canonical standards:** `/Volumes/AI Storage/EGS/EGS-STANDARDS.md` — read §1–§2 before building. A request conflicting with Tier 1 = stop and say so.
+
+---
+
 # Stagger — repo notes
 
 Extends the EGS working standards in `../../CLAUDE.md`. Only repo-specific rules live here.
@@ -550,6 +554,70 @@ Still outstanding, not fixed here: `stagger-manifest.webmanifest` is a byte-iden
 duplicate of `manifest.webmanifest`; and `manifest.webmanifest` points at
 `icons/icon-maskable-512.png` while the file on disk is `icons/icon-512-maskable.png`, so the
 maskable icon 404s.
+
+## The paneling generator — round 2 (2026-08-04)
+
+From a real pine ceiling: run 261.75″, trusses 24″ o.c. first at 18″, 12′ stock, 29 rows. The
+generator produced a layout that **cycled**; Edwin caught it on the ceiling, not on a screen, and
+rescued the remaining rows by hand. Both sequences are pinned in `test_generator2.js`.
+
+**Why `layoutPeriod()` missed it — do not trust it alone again.** It asks for a WHOLE-SEQUENCE
+period (`s[k] === s[k-p]` for every k). The failure was **interleaved**: from row I every second row
+was the identical two-piece row `{5}` while the odd rows cycled a six-row pool. No single `p`
+describes that, so it scored as varied. **Rule 4 is the question that catches it** — has this exact
+row appeared in the last five, whatever happened in between.
+
+### The five rules, all enforced at GENERATION time
+1. **Vocabulary** — middles are every o.c. multiple from 2 bays to stock (24″/144″ ⇒ 48/72/96/120/144).
+   The pool always held all five; the *walk* only ever reached for `{48,120}`.
+2. **Truss exclusion** — no joint on a truss carrying one in either of the previous two rows. **Hard.**
+   3+ is preferred, **soft only**.
+3. **Staircase ban** — never complete a joint marching one truss per row across three rows.
+4. **Signature spacing** — an identical row makeup never recurs within 5 rows. **Hard.** The
+   fixed-rhythm echo half is **soft**.
+5. **Forced-row cap** — ~1 per 8 rows, **and only where exactly ONE two-piece row is possible.**
+
+**Rule 3 is STEP-24 ONLY, and that is measured.** Reading it to also ban a 48″-per-row march rejects
+the hand rescue seven times (J→K→L is t3→t5→t7). The must-pass fixture decides the reading; both
+directions are pinned so the stricter one cannot creep back as a "tightening".
+
+**R2's "prefer 3+" and R4's echo check must stay soft** — the hand rescue breaches the first seven
+times and has three echoes of its own. A hard version rejects the layout that must pass.
+
+**Rule 5's condition is the rule.** A first cut rationed every single-joint row; the seed sweep
+caught it on a 180″ run where **five** two-piece rows are legal — a family, not a signature. Where
+more than one exists the ration stands down and rules 2 and 4 already stop any single one recurring.
+
+### The walk backtracks; it does not relax
+Tightening rule 2 means a greedy walk can corner itself, and the old answer to a corner was to
+**relax a hard rule and carry on** — which is how a violation reaches a ceiling. It is now a
+depth-first search with a node budget, ordered by the soft preferences and randomised within them.
+Relaxation happens only after the search is exhausted, and it is reported.
+
+Two preferences were **removed**: the anti-diagonal filter (rule 3 is the sharper, hard version) and
+the 42″ short-end tie-break (a material idea acting as a strong attractor toward one row shape — it
+belongs in stock assignment, not in where a seam is visible). One was **kept**: two-bay separation
+from the row above, now a strict **ordering tier** rather than a filter. Dropping it was a real
+regression the panel goldens caught (`oneBay` 0 → 17); as a tier over a backtracking search it
+recovers to 1 without ever buying separation at the price of rule 2.
+
+`generateOptions(trusses, runIn, capIn, rows, {prevRows})` — `prevRows` is the courses already
+installed. Optional, so every existing caller is unchanged. It exists because the defect was found
+**mid-job**: a rule window starting at the generator's own row 0 will happily reuse a truss from the
+last installed course.
+
+**The label is earned.** `"non-repeating stagger · A"` only when `passesFiveRules()`; otherwise it
+names what failed ("2 seam(s) too close", "3 repeated row(s)").
+
+### KNOWN: `cluster` is not comparable across this rebuild
+28 → 56 on the ceiling fixture, and **30 of the 56 are `rowgap2 delta1`** — a joint one bay from a
+joint two rows up. Rule 2 forbids delta 0 there, so it *pushes* joints onto the neighbouring truss,
+and `auditLayout`'s cluster counts delta 0 and delta 1 identically. The old 28 included delta-0 pairs
+the spec now bans outright. **Filed as its own thread:** the metric should weight delta 0 above
+delta 1 at rowgap ≥ 2 — a change to a measure, with its own goldens.
+
+Side effect worth knowing: on the app's **default** inputs the six options no longer consume
+identical boards (56/57/58, waste 5.9–9.1%). That closes the old takeoff-vs-option report.
 
 ## Test harnesses
 

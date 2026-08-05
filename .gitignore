@@ -22,3 +22,6 @@ render-*.svg
 render-*.svg.png
 
 .DS_Store
+
+# Timestamped backups of the notes files, written by the EGS tooling.
+*.md.bak.*

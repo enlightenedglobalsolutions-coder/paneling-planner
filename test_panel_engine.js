@@ -59,15 +59,55 @@ function runCase(f){
 //  FIXTURES — golden pins captured from the shipped engine.
 // ---------------------------------------------------------------------------
 var FIXTURES = [
+  /* RE-GOLDENED 2026-08-04 for the generator round-2 rebuild. This is the only
+     fixture that moved, and it moved because it is the only one whose layout the
+     BUILDER actually produces — `short` and `jointless` take the jointless early
+     return and are byte-identical, which is the check that says the blast radius
+     is the rebuild and nothing else.
+
+     What the old pin recorded: `label:"stagger · A"`, oneBay 0, cluster 28. That
+     layout is the same class of output as the Aug 4 pine-ceiling failure — the
+     old builder's, with its interleaved cycle that layoutPeriod could not see.
+     Pinning it as characterisation was correct while it was what shipped; it is
+     not something to preserve.
+
+     THE TWO NUMBERS THAT MOVED, AND WHY:
+
+     `oneBay` 0 -> 1. The old walk enforced two-bay separation from the row above
+     as a FILTER, which is why it scored 0 — and when the filter emptied the pool
+     it relaxed a HARD rule to escape. It is now a strict ordering tier over a
+     backtracking search: separation where the geometry allows it, given up where
+     it does not, and never at the price of rule 2. One is the residue.
+
+     `cluster` 28 -> 56, and it is NOT COMPARABLE across the rebuild. Decomposed,
+     30 of the 56 are `rowgap2 delta1` — a joint one bay from a joint two rows
+     up. Rule 2 forbids delta 0 there, so the engine is pushed onto the
+     neighbouring truss, and `cluster` counts delta 0 and delta 1 identically.
+     The old 28 INCLUDED delta-0 pairs that the spec now bans outright. So the
+     number is counting a category the new hard rule creates by construction.
+     FILED, not fixed: auditLayout's cluster metric should probably weight delta
+     0 above delta 1 at rowgap >= 2 — that is a change to a measure, with its own
+     goldens, and not this spec's business.
+
+     (Both numbers were worse mid-rebuild — oneBay 6, cluster 80 — until rule 5
+     was corrected to apply only where exactly ONE two-piece row is possible. On
+     this fixture five are, so the ration correctly stands down and the search
+     gets its room back. That correction came from the seed sweep, not from here.)
+
+     Justification for the new pin: it passes all five rules and reaches the full
+     seven-length vocabulary, asserted directly below rather than left implied. */
   { key:'ceiling', why:"the real Zapach-style ceiling — joints on trusses, runs out of 16ft stock",
     roomWidthIn:262, roomDepthIn:150, face:5, offset:18, oc:24, maxIn:192, buffer:12,
     qty:{12:60,16:20},
     trusses:11, rows:30, cap:192, longest:192, nOpts:6,
-    label:"stagger · A", firstRows:[[1,4,8],[6],[2,9],[7]],
-    stats:{illegal:0,stacked:0,oneBay:0,twoBackOver:0,cluster:28,reachBoth:true,coverage:9},
+    label:"non-repeating stagger · A", firstRows:[[1,5,8],[3],[7,9],[2,4]],
+    stats:{illegal:0,stacked:0,oneBay:1,twoBackOver:0,cluster:56,reachBoth:true,coverage:9},
     rowStock4:[192,192,192,192],
-    shortage:{row:13,rowsLeft:17,len:16},
-    takeoff:null, sha:'03249dbed87369fe' },
+    // Shortage moved 13 -> 15, rowsLeft 17 -> 15: the new layout gets two more
+    // rows out of the 16′ stock before running dry. Re-goldened, not a break.
+    shortage:{row:15,rowsLeft:15,len:16},
+    takeoff:null, sha:'e70b5988f8015262',
+    fiveRules:true, vocabCount:7 },
 
   { key:'short', why:"run fits one board — the jointless early return",
     roomWidthIn:140, roomDepthIn:96, face:5, offset:12, oc:24, maxIn:192, buffer:10,
@@ -116,6 +156,22 @@ FIXTURES.forEach(function(f){
   }
   ok(f.key+": takeoff unchanged", eq(R.tk, f.takeoff), JSON.stringify(R.tk));
   ok(f.key+": full-structure digest "+f.sha, E.digest(R.opts)===f.sha, E.digest(R.opts));
+
+  /* A golden is a record of what the engine does; it is not a claim that what it
+     does is right. For the fixture the round-2 rebuild moved, assert the QUALITY
+     as well as the bytes — otherwise the next person re-goldening this has no
+     way to tell a fix from a regression that happened to be stable. */
+  if (f.fiveRules){
+    var chk = P.checkFiveRules(R.inp.trusses, R.inp.runIn, R.cap, o.rowJoints, []);
+    ok(f.key+": the pinned layout passes all five rules", P.passesFiveRules(chk),
+       "r2="+chk.r2.length+" r3="+chk.r3.length+" r4="+chk.r4.length
+       +" forced="+chk.forced+"/"+chk.forcedCap+" illegalMid="+chk.illegalMid.length);
+    ok(f.key+": ...and reaches the whole middle-piece vocabulary",
+       chk.vocabUsed.length===f.vocabCount, "["+chk.vocabUsed.join(",")+"]");
+    ok(f.key+": ...and every option offered is clean, not just the first",
+       R.opts.every(function(x){ return x.clean; }),
+       R.opts.filter(function(x){ return !x.clean; }).length+" unclean");
+  }
 });
 
 // ===========================================================================
@@ -300,9 +356,22 @@ console.log("\nplanOffcuts");
 (function(){
   var R=runCase(FIXTURES[0]);
   var plan=P.planOffcuts(R.inp, R.opts[0].rowJoints.slice(3,7), 192);
-  ok("row letters are LOCAL to the array passed in (restart at A)",
-     plan.plan.length===0 || plan.plan[0].piece.row==='A',
-     plan.plan.length? plan.plan[0].piece.row : 'empty');
+  /* REWRITTEN 2026-08-04, not re-goldened — the old assertion was an accidental
+     proxy. It asked whether the FIRST entry's letter was 'A', which held only
+     because of which piece happened to sort first under the old layout; the
+     round-2 rebuild changed the layout and it read 'D'. That is not the
+     property anyone cares about.
+
+     The real invariant is that a 4-row slice is lettered A–D locally, rather
+     than carrying its parent's D–G. Asserting the whole SET tests that
+     directly and does not depend on ordering at all. */
+  var letters = plan.plan.map(function(p){ return p.piece.row; });
+  var localSet = "ABCD".split("");
+  ok("row letters are LOCAL to the array passed in (A–D, not the parent's D–G)",
+     letters.length>0 && letters.every(function(L){ return localSet.indexOf(L)>=0; }),
+     letters.join(',') || 'empty');
+  ok("...and the slice really is offset in the parent, so this could have failed",
+     JSON.stringify(R.opts[0].rowJoints.slice(3,7)) !== JSON.stringify(R.opts[0].rowJoints.slice(0,4)));
   ok("no offcut under 24\" is ever kept",
      plan.leftover.every(function(l){ return l.len>=24; }),
      JSON.stringify(plan.leftover.map(function(l){return l.len;})));
@@ -380,17 +449,37 @@ console.log("\nTAKEOFF IS OPTION-SENSITIVE — investigated, not assumed");
     return { opts:opts, out:out };
   }
 
-  // 1) It DOES move, on geometry that makes it move.
+  /* RE-GOLDENED 2026-08-04 for the generator round-2 rebuild — AND THE REPORTED
+     SYMPTOM IS NOW CLOSED.
+
+     This section was written to defend a conclusion: the takeoff follows the
+     CUT, so six options consuming identical boards is not a bug. It demonstrated
+     that by showing the takeoff DID move on one geometry while it did not on the
+     app's own default inputs — the default case being the thing Edwin reported.
+
+     After the rebuild the takeoff moves on BOTH. The rules force the six options
+     genuinely apart rather than letting them settle into near-copies, so the
+     situation the original investigation had to explain away no longer arises on
+     either fixture. The conclusion is unchanged; the awkward case simply stopped
+     being the only place you could see it.
+
+     Both are kept, because two geometries with different stock make a stronger
+     statement than one, and because losing the awkward fixture would lose the
+     coverage of multi-length nesting. */
+
+  // 1) Several stock lengths (8/12/16ft): distinct layouts, and the order moves.
   var awkward = takeoffs(mkInp({widthIn:27*12+7, depthIn:11*12, face:6, offset:20, oc:24,
                                 maxIn:192, buffer:12, qty:{8:60,12:60,16:60}}));
+  var awkSigs = awkward.opts.map(function(o){ return JSON.stringify(o.rowJoints); });
+  ok("awkward run: 6 DISTINCT layouts", new Set(awkSigs).size === awkward.opts.length,
+     new Set(awkSigs).size+" of "+awkward.opts.length);
   var boards = awkward.out.filter(Boolean).map(function(t){ return t.totalBoards; });
   ok("takeoff varies across options when the cut does ("+boards.join(',')+")",
      new Set(boards).size > 1, boards.join(','));
   var wastes = awkward.out.filter(Boolean).map(function(t){ return t.wastePct; });
   ok("...and so does the waste ("+wastes.join(',')+")", new Set(wastes).size > 1);
 
-  // 2) On the app's DEFAULT inputs it does not — and the options are still
-  //    genuinely different layouts, which is what makes the report reasonable.
+  // 2) The app's DEFAULT inputs, one stock length — the reported case.
   var def = takeoffs(mkInp({widthIn:21*12+10.25, depthIn:12*12, face:5, offset:18, oc:24,
                             maxIn:192, buffer:12, qty:{12:60}}));
   var sigs = def.opts.map(function(o){ return JSON.stringify(o.rowJoints); });
@@ -398,11 +487,14 @@ console.log("\nTAKEOFF IS OPTION-SENSITIVE — investigated, not assumed");
      new Set(sigs).size+" of "+def.opts.length);
   var pieces = def.opts.map(function(o){
     return o.rowJoints.reduce(function(s,j){ return s+j.length+1; }, 0); });
-  ok("...that even differ in total piece count ("+pieces.join(',')+")",
-     new Set(pieces).size > 1);
+  ok("...that differ in total piece count ("+pieces.join(',')+")", new Set(pieces).size > 1);
+  /* THE FLIPPED ONE. This used to read "...yet all consume the same boards,
+     which is the reported symptom" and pinned `new Set(defBoards).size === 1`.
+     The rebuild closed it: on the inputs the app actually ships with, the six
+     options no longer land on the same board count. */
   var defBoards = def.out.filter(Boolean).map(function(t){ return t.totalBoards; });
-  ok("...yet all consume the same boards, which is the reported symptom",
-     new Set(defBoards).size === 1, defBoards.join(','));
+  ok("...and the boards now move with them — the reported symptom is closed ("+defBoards.join(',')+")",
+     new Set(defBoards).size > 1, defBoards.join(','));
 
   // 3) It is a real simulation, not a lineal estimate wearing a costume.
   var t0 = def.out.filter(Boolean)[0];

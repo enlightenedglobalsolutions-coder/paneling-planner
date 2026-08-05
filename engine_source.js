@@ -92,14 +92,25 @@ var ENGINES = {
     // the loader declares the binding itself and hands the harness a setter.
     // Tests must set it explicitly per case rather than inherit it.
     preamble: 'var LONGEST_STOCK = 0;',
-    accessors: {
-      setLongestStock: 'function(v){ LONGEST_STOCK = v; }',
-      getLongestStock: 'function(){ return LONGEST_STOCK; }'
-    },
     exports: ['buildTrusses', 'segLengths', 'maxSeg', 'jointCount',
               'candidateRows', 'buildPanelLayout', 'auditLayout', 'optionStats',
               'generateOptions', 'assignStock', 'computeTakeoff', 'planOffcuts',
-              'capForInputs', 'rowName']
+              'capForInputs', 'rowName', 'layoutPeriod',
+              // Generator round 2 — the five rules from the Aug 4 spec. Exported
+              // so test_generator2.js drives the SHIPPED checkers rather than a
+              // second copy written in the harness: two implementations of a
+              // rule agree right up until the day they matter.
+              'midVocabulary', 'rowMiddles', 'vocabOf',
+              'trussConflicts', 'rule2Violations', 'rule2SoftBreaches',
+              'rule3Violations', 'completesStaircase',
+              'rule4Violations', 'rule4Echoes',
+              'forcedRows', 'forcedRowCap', 'countForced', 'forcedSignature',
+              'checkFiveRules', 'passesFiveRules'],
+    accessors: {
+      setLongestStock: 'function(v){ LONGEST_STOCK = v; }',
+      getLongestStock: 'function(){ return LONGEST_STOCK; }',
+      getSigWindow:    'function(){ return SIG_WINDOW; }'
+    }
   },
 
   // Deck ordering — the Reshuffle layer. Deliberately OUTSIDE the fl slice
