@@ -555,6 +555,61 @@ duplicate of `manifest.webmanifest`; and `manifest.webmanifest` points at
 `icons/icon-maskable-512.png` while the file on disk is `icons/icon-512-maskable.png`, so the
 maskable icon 404s.
 
+## The paneling drawing — whole ceiling, and a fullscreen page (2026-08-05)
+
+**The drawing ALWAYS shows every row.** It did not: a 29-row pine job drew ten, under a footer
+reading *"10 of 29 rows"*, directly above a cut list of twenty-nine. Nothing crashed and nothing was
+logged, so a self-contradiction sat on one screen until somebody under the ceiling noticed.
+
+Two clamps compounding — `Math.min(showRows || rowJoints.length, 10)` inside `drawDiagram`, and the
+on-screen caller passing `10` on top. **The hard cap also hit PRINT and EXPORT**, which nobody had
+seen: both pass `inp.rows` and both got ten anyway. That is a sheet you carry up a ladder covering a
+third of the job. `showRows` is **gone**, not defaulted — a parameter whose only use is drawing an
+incomplete ceiling has no honest caller.
+
+**Rows compress; they never disappear.** `diagRowHeight()` shrinks the row so the whole ceiling fits
+a height budget. Jobs **up to 22 rows are byte-unchanged** (the budget divided by 22 still exceeds
+`DIAG_RH_MAX`). Past ~145 rows the legibility floor `DIAG_RH_MIN` wins and the drawing is allowed to
+exceed the budget and scroll — an invisible row is a partial drawing by another route. Print and the
+fullscreen overlay take `DIAG_H_PRINT`, a taller budget: paper and a zoomable page are not a phone.
+
+**The gutter widens for multi-letter row names.** At a fixed 10 units, `AA`/`AB`/`AC` were
+right-aligned at x=7 and ran off the left edge — the last three rows of the job silently lost their
+labels. Found by looking at the drawing, not by a test.
+
+**Rule 3 — the drawing and the cut list cannot disagree.** `drawDiagram` derives its count from
+`rowJoints.length`, so it cannot be short by construction. What construction cannot cover is
+`inp.rows` disagreeing with the layout handed in, so the drawing **says so on itself** — a warn band
+reading *"drawing shows N rows, cut list expects M — do not use"*, sized into the viewBox so the one
+warning that matters is not the one thing clipped away. `diagRowCount(svg)` reads the count back out
+of finished SVG, so tests check the OUTPUT rather than re-running the arithmetic and agreeing with
+themselves.
+
+### `DrawingOverlay` — the fullscreen page, as a component
+Tap the diagram for rotate / pinch-zoom / pan / fit. Paneling had no fullscreen view at all.
+
+It is a **component, not a copy**. The flooring overlay is ~130 lines wired to `S.cands`/`buildSvg`;
+copying it would put two pinch-zoom implementations in one file, which is the drift this repo keeps
+paying for. Callers supply only `{svg, contentW, contentH, foot, buttons, onRotate}`.
+
+**Flooring is NOT migrated yet — filed.** It should be, and this is written as the general case so
+the migration is deletion rather than rewriting. Its gesture surface is untested code that can only
+really be judged with fingers on a phone, and rolling that into a bug fix that needed to ship would
+mix a verifiable change with an unverifiable one. `test_diagram.js` asserts pinch-zoom exists **at
+most twice** and will need tightening to 1 when flooring moves.
+
+**Two bugs found only by measuring the rendered box — both silent, both pinned:**
+- **`rotate(90)` without a unit is invalid CSS**, and an invalid value voids the *whole* transform
+  declaration. The drawing lost its transform entirely on rotate and fell back to the stylesheet's
+  full width. Must be `90deg`. Note `rotate(90)` **is** correct in an SVG transform *attribute* —
+  the flooring renderer uses it legitimately — so the test is scoped to the overlay, not the file.
+- **The element is sized to the drawing's own dimensions, never to `contentSize()`.** That helper is
+  already swapped when rotated; sizing from it and then rotating swaps twice and the drawing came out
+  transposed. `contentSize()` answers "how much room does this need", which is Fit's question.
+- Sizing uses **inline styles**, because a width *attribute* loses to `svg.dg{width:100%}` in the
+  stylesheet. The flooring overlay never hit this only because its SVGs carry no such class — an
+  accident a shared component must not rely on.
+
 ## The paneling generator — round 2 (2026-08-04)
 
 From a real pine ceiling: run 261.75″, trusses 24″ o.c. first at 18″, 12′ stock, 29 rows. The

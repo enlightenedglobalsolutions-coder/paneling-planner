@@ -37,7 +37,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script>window.EGS_VERSION = '2026.08.04-1902';</script>
+<script>window.EGS_VERSION = '2026.08.05-1314';</script>
 <title>Stagger</title>
 <script>
 /* Resolve the stored theme BEFORE the stylesheet paints, so there is never a
@@ -143,6 +143,10 @@
   .seg-toggle button.on{background:var(--brass-fill);color:var(--on-brass);border-color:var(--brass)}
 
   .diagwrap{background:var(--ink-2);border:.5px solid var(--line);border-radius:10px;padding:10px;overflow:hidden}
+  /* The diagram is a way into the fullscreen page, so it has to look like one. */
+  .diagwrap.tappable{cursor:pointer}
+  .diagwrap.tappable:active{border-color:var(--brass)}
+  .diagwrap svg{display:block;width:100%;max-width:100%;height:auto}
   svg.dg{display:block;width:100%;height:auto}
   .optbar{display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:10px}
   .optbar .who{font-size:12px;color:var(--paper-dim);font-weight:600}
@@ -915,6 +919,15 @@ button.stgPin.on{background:rgba(190,150,70,.30);}
   <div class="fl-ov-foot" id="fl-ov-foot"></div>
 </div>
 <!-- ===== FLOORING MODULE OVERLAY END ===== -->
+
+<!-- Generic fullscreen drawing overlay. Reuses the .fl-ov* styles rather than
+     duplicating them: those rules are about a fullscreen stage with a toolbar,
+     not about flooring, and the print rule that hides .fl-ov covers this too. -->
+<div class="fl-ov" id="ov2">
+  <div class="fl-ov-bar" id="ov2-bar"></div>
+  <div class="fl-ov-stage" id="ov2-stage"></div>
+  <div class="fl-ov-foot" id="ov2-foot"></div>
+</div>
 
 <script>
 "use strict";
@@ -1837,42 +1850,343 @@ function applyActiveOption(){
 }
 
 // ---------- diagram ----------
-function drawDiagram(inp, rowJoints, rowStock, showRows){
-  var W=320, top=26, rh=16;
+/* ===========================================================================
+   DrawingOverlay — the fullscreen rotate/zoom page, as a component.
+
+   Paneling had no fullscreen view at all: a 29-row ceiling drew into a 320-wide
+   card and that was the only way to look at it. The flooring layout has had
+   rotate, pinch-zoom, pan and fit for some time, and Edwin's rule 2 is simply
+   "paneling gets parity".
+
+   WHY THIS IS A COMPONENT AND NOT A COPY. The flooring overlay is ~130 lines of
+   toolbar, fit maths and pointer handling living inside the FL closure, wired to
+   S.cands/S.cfg/buildSvg. Copying it for paneling would put two pinch-zoom
+   implementations in one file, which is the drift this repo keeps paying for —
+   the hand-copied bridge/spread/lshape blocks, the byte-identical service
+   worker, the duplicated v2-modules. So the generic half lives here once and the
+   caller supplies only what is genuinely its own:
+
+       DrawingOverlay.open({
+         svg,                  // SVG element or markup string
+         contentW, contentH,   // untransformed drawing size, for Fit
+         foot,                 // one line under the stage
+         buttons,              // [{label, on, onTap}] appended after Fit
+         onRotate              // optional: re-supply the svg when rotated
+       })
+
+   FLOORING IS DELIBERATELY NOT MIGRATED IN THIS PASS. It should be — this is
+   written as the general case so the migration is deletion rather than rewriting
+   — but its gesture surface is untested code that can only really be judged with
+   fingers on a phone, and rolling that into a bug fix that needs to ship would
+   mix a verifiable change with an unverifiable one. Filed, not done.
+
+   Rotation is a transform on the drawing, never a request to the device: iOS
+   Safari will not let a web app lock orientation, so "turn your phone" cannot be
+   a button. The control turns the picture. */
+var DrawingOverlay = (function(){
+  var OV = { open:false, rotated:false, scale:1, tx:0, ty:0, panned:false, cfg:null };
+  var bound = false;
+
+  function $ov(id){ return document.getElementById(id); }
+  function stage(){ return $ov("ov2-stage"); }
+
+  function contentSize(){
+    var c = OV.cfg || { contentW:1, contentH:1 };
+    // Rotating swaps the axes — the drawing is turned, not re-laid out.
+    return OV.rotated ? { w:c.contentH, h:c.contentW } : { w:c.contentW, h:c.contentH };
+  }
+  function applyTransform(){
+    var svg = stage().querySelector("svg");
+    if (!svg) return;
+    /* THE ELEMENT KEEPS ITS OWN SIZE; THE ROTATION MAKES THE FOOTPRINT.
+       Sizing it to contentSize() — which is already swapped when rotated — and
+       THEN rotating swaps twice: the drawing came out transposed, 582x938 where
+       it should have been 938x582. contentSize() answers "how much room does
+       this need on the stage", which is Fit's question. The element's own width
+       and height are always the drawing's own. */
+    var c = { w: OV.cfg.contentW, h: OV.cfg.contentH };
+    /* INLINE styles, not just attributes. The paneling diagram carries
+       `class="dg"`, and the stylesheet says `svg.dg{width:100%}` — which beats a
+       width ATTRIBUTE, so inside the stage the drawing stretched to the stage
+       width and every fit calculation was computed against a size the element
+       did not have. The flooring overlay never hit this because its SVGs carry
+       no such class, which is exactly the kind of accident a shared component
+       must not depend on. An inline style outranks the sheet, so the overlay
+       sizes what it is given whatever the caller's CSS says. */
+    svg.setAttribute("width", c.w);
+    svg.setAttribute("height", c.h);
+    svg.style.width  = c.w + "px";
+    svg.style.height = c.h + "px";
+    /* Transforms apply right to left: translate(0,-H) then rotate, which maps
+       the drawing onto [0,H] x [0,W] — the swap contentSize() reports.
+       `rotate(90)` WITHOUT A UNIT IS INVALID CSS and takes the whole declaration
+       down with it silently: the drawing lost its transform entirely on rotate
+       and fell back to the stylesheet's full width. It must be `90deg`. */
+    var spin = OV.rotated ? " rotate(90deg) translate(0,-" + OV.cfg.contentH + "px)" : "";
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = "translate(" + OV.tx + "px," + OV.ty + "px) scale(" + OV.scale + ")" + spin;
+  }
+  function fit(){
+    var st = { w: stage().clientWidth, h: stage().clientHeight }, c = contentSize();
+    if (!st.w || !st.h || !c.w || !c.h) return;
+    var s = Math.min(st.w / c.w, st.h / c.h) * 0.96;
+    OV.scale = s;
+    OV.tx = (st.w - c.w*s)/2;
+    OV.ty = (st.h - c.h*s)/2;
+    applyTransform();
+  }
+
+  function paint(){
+    var st = stage(); while (st.firstChild) st.removeChild(st.firstChild);
+    var svg = OV.cfg.svg;
+    if (typeof svg === "string"){
+      var box = document.createElement("div");
+      box.innerHTML = svg;
+      svg = box.querySelector("svg");
+    }
+    if (svg) st.appendChild(svg);
+    applyTransform();
+    var foot = $ov("ov2-foot");
+    while (foot.firstChild) foot.removeChild(foot.firstChild);
+    foot.textContent = OV.cfg.foot || "Pinch to zoom · drag to pan";
+  }
+
+  function buildBar(){
+    var bar = $ov("ov2-bar");
+    while (bar.firstChild) bar.removeChild(bar.firstChild);
+    function btn(cls, label, fn){
+      var b = document.createElement("button");
+      if (cls) b.className = cls;
+      b.type = "button";
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      bar.appendChild(b);
+      return b;
+    }
+    btn("close", "✕ Close", close);
+    btn(OV.rotated ? "on" : "", "↻ Rotate", function(){
+      OV.rotated = !OV.rotated;
+      // The caller may want to re-render rather than just be spun.
+      if (OV.cfg.onRotate){
+        var next = OV.cfg.onRotate(OV.rotated);
+        if (next) OV.cfg.svg = next;
+      }
+      buildBar(); paint(); fit();
+    });
+    btn("", "Fit", fit);
+    (OV.cfg.buttons || []).forEach(function(spec){
+      btn(spec.on ? "on" : "", spec.label, function(){
+        spec.onTap({ repaint:function(next){ if(next) OV.cfg.svg=next; buildBar(); paint(); fit(); } });
+      });
+    });
+  }
+
+  /* Pointer handling: pinch to zoom about the point under the fingers, drag to
+     pan. Bound ONCE against the stage element, not per open — rebinding on every
+     open is how a listener leak turns into a drawing that jumps two frames for
+     every time it has been opened. */
+  function bindGestures(){
+    if (bound) return;
+    bound = true;
+    var st = stage();
+    var pts = {}, startDist = 0, startScale = 1, startMid = null, startTx = 0, startTy = 0, downAt = null;
+
+    st.addEventListener("pointerdown", function(e){
+      st.setPointerCapture(e.pointerId);
+      pts[e.pointerId] = { x:e.clientX, y:e.clientY };
+      var ids = Object.keys(pts);
+      OV.panned = false;
+      if (ids.length === 1){
+        downAt = { x:e.clientX, y:e.clientY, tx:OV.tx, ty:OV.ty };
+      } else if (ids.length === 2){
+        var a = pts[ids[0]], b = pts[ids[1]];
+        startDist = Math.hypot(a.x-b.x, a.y-b.y) || 1;
+        startScale = OV.scale;
+        var rect = st.getBoundingClientRect();
+        startMid = { x:(a.x+b.x)/2 - rect.left, y:(a.y+b.y)/2 - rect.top };
+        startTx = OV.tx; startTy = OV.ty;
+        downAt = null;
+      }
+    });
+    st.addEventListener("pointermove", function(e){
+      if (!pts[e.pointerId]) return;
+      pts[e.pointerId] = { x:e.clientX, y:e.clientY };
+      var ids = Object.keys(pts);
+      if (ids.length >= 2 && startMid){
+        var a = pts[ids[0]], b = pts[ids[1]];
+        var dist = Math.hypot(a.x-b.x, a.y-b.y) || 1;
+        var next = Math.min(12, Math.max(0.05, startScale * (dist/startDist)));
+        OV.tx = startMid.x - (startMid.x - startTx) * (next/startScale);
+        OV.ty = startMid.y - (startMid.y - startTy) * (next/startScale);
+        OV.scale = next;
+        OV.panned = true;
+        applyTransform();
+      } else if (ids.length === 1 && downAt){
+        var dx = e.clientX - downAt.x, dy = e.clientY - downAt.y;
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) OV.panned = true;
+        OV.tx = downAt.tx + dx; OV.ty = downAt.ty + dy;
+        applyTransform();
+      }
+    });
+    function up(e){
+      delete pts[e.pointerId];
+      if (Object.keys(pts).length < 2) startMid = null;
+      if (Object.keys(pts).length === 0) downAt = null;
+    }
+    st.addEventListener("pointerup", up);
+    st.addEventListener("pointercancel", up);
+  }
+
+  function open(cfg){
+    OV.cfg = cfg || {};
+    OV.rotated = !!cfg.rotated;
+    OV.open = true;
+    $ov("ov2").classList.add("on");
+    bindGestures();
+    buildBar();
+    paint();
+    // The stage has no size until it is displayed, so Fit has to run after the
+    // class lands. Without this the first open shows the drawing at scale 1 in
+    // the corner, which reads as broken rather than as un-fitted.
+    window.setTimeout(fit, 0);
+  }
+  function close(){
+    OV.open = false;
+    $ov("ov2").classList.remove("on");
+    OV.cfg = null;
+  }
+  function isOpen(){ return OV.open; }
+
+  return { open:open, close:close, isOpen:isOpen, fit:fit };
+})();
+
+/* RULE 3 — THE DRAWING AND THE CUT LIST CANNOT DISAGREE.
+
+   The bug this comes from was a self-contradiction sitting on one screen: a
+   drawing of ten rows above a cut list of twenty-nine. Nothing crashed and
+   nothing was logged, which is why it survived to a real ceiling.
+
+   `drawDiagram` now derives its row count from `rowJoints.length`, so the
+   drawing cannot be short by construction. What construction cannot cover is the
+   OTHER side: `inp.rows` is what the cut list and the takeoff are built from, and
+   if it ever disagrees with the layout it was handed, one of the two is lying.
+   Rather than pick a winner silently, the drawing says so, on the drawing, where
+   somebody comparing the two is already looking.
+
+   `diagRowCount()` reads the count back out of finished SVG. Tests use it to
+   compare against the cut list without re-deriving anything the renderer did —
+   the point is to check the OUTPUT, not to re-run the arithmetic and agree with
+   ourselves. */
+function diagRowCount(svg){
+  return (String(svg).match(/class="dgrow"/g) || []).length;
+}
+function diagMismatchBand(rows, expected, W, y){
+  return '<rect x="0" y="'+(y-9).toFixed(1)+'" width="'+W+'" height="13" fill="'+TOK.warn+'"/>'
+       + '<text x="'+(W/2)+'" y="'+(y+0.5).toFixed(1)+'" font-size="8" font-weight="bold" '
+       + 'fill="'+textOn(TOK.warn)+'" font-family="sans-serif" text-anchor="middle">'
+       + 'drawing shows '+rows+' rows, cut list expects '+expected+' \u2014 do not use</text>';
+}
+
+/* THE DRAWING ALWAYS SHOWS EVERY ROW.
+
+   It did not. There were two clamps and they compounded: this function opened
+   with `Math.min(showRows || rowJoints.length, 10)`, and the on-screen caller
+   passed 10 on top of that. So a 29-row pine ceiling drew ten rows under a
+   footer reading "10 of 29 rows" — a drawing that contradicted the cut list
+   printed directly beneath it.
+
+   THE HARD CAP ALSO HIT PRINT AND EXPORT, which is the part nobody had seen.
+   `buildPrintArea()` and `exportData()` both pass `inp.rows` — 29 — and both
+   got ten anyway, because the cap ignored what they asked for. That is a sheet
+   you carry up a ladder covering a third of the job.
+
+   So `showRows` is gone rather than defaulted. A parameter that can only be
+   used to draw an incomplete ceiling has no honest caller: the drawing is what
+   the cut list gets checked against, and a partial one is worse than none.
+
+   HOW IT FITS INSTEAD. The row height gives, not the row count. `rh` shrinks so
+   the whole ceiling lands inside a height budget, down to a floor where a row is
+   little more than a line — which is the intended trade. Jobs up to 22 rows are
+   untouched: the budget divided by 22 still exceeds RH_MAX, so they render at
+   exactly the old 16px and every existing golden holds.
+
+   Print gets a taller budget because paper is not a phone — the same split the
+   flooring view documents between `.fl-scroll` and `.fl-print-diag`. */
+var DIAG_RH_MAX = 16;     // unchanged for ordinary jobs
+var DIAG_RH_MIN = 2.5;    // a row is a line; still legible as a seam field
+var DIAG_H_SCREEN = 416;  // ~1.3 x the 320 viewBox width
+var DIAG_H_PRINT  = 900;  // paper; keeps rows readable on a long ceiling
+
+function diagRowHeight(rows, maxH){
+  if (!(rows > 0)) return DIAG_RH_MAX;
+  var budget = (maxH || DIAG_H_SCREEN) - 26 - 26;      // top matter + footer
+  return Math.max(DIAG_RH_MIN, Math.min(DIAG_RH_MAX, budget / rows));
+}
+
+function drawDiagram(inp, rowJoints, rowStock, opts){
+  opts = opts || {};
+  var W=320, top=26;
   var runIn=inp.runIn, trusses=inp.trusses;
-  var rows=Math.min(showRows||rowJoints.length, 10);
-  var left=10, right=W-10, span=right-left;
+  // EVERY row, always. Never a caller's idea of how many to show.
+  var rows = rowJoints.length;
+  var rh = diagRowHeight(rows, opts.maxHeight);
+  /* The left gutter has to hold the widest row LETTER, not a fixed 10 units.
+     A 29-row ceiling reaches AA/AB/AC, and at the fixed gutter those two-letter
+     names were drawn right-aligned at x=7 and ran off the left edge of the
+     viewBox — the last three rows of a job lost their labels, which is exactly
+     the row somebody is squinting at when they get to the end. Measured from
+     the actual last row name, so it widens only when it needs to. */
+  var widestLabel = rowName(Math.max(0, rows-1)).length;
+  var left = Math.max(10, 4 + widestLabel * 5.2), right=W-10, span=right-left;
   function ix(inches){ return left + span*(inches/runIn); }
-  var h = top + rows*rh + 26;
-  var s = '<svg class="dg" viewBox="0 0 '+W+' '+h+'" role="img" aria-label="Ceiling paneling layout with joints on trusses">';
-  s += '<text x="'+left+'" y="'+(top-12)+'" font-size="8" fill="'+TOK.brass+'" font-family="sans-serif">'+inp.offset+'\u2033</text>';
+  /* The mismatch band is decided BEFORE the height, or it renders outside the
+     viewBox and the one warning that matters is the one thing clipped away. */
+  var mismatch = (typeof inp.rows === "number" && inp.rows !== rows) ? inp.rows : null;
+  var h = top + rows*rh + 26 + (mismatch !== null ? 16 : 0);
+
+  // Everything that carries text or weight scales with the row, so a compressed
+  // ceiling degrades into a clean seam field instead of a smear of overlaps.
+  var labelFont = Math.max(4, Math.min(7, rh*0.45));
+  var showLetters = rh >= 6;
+  var showStock   = rh >= 7.5;
+  var barH  = Math.max(1, rh - Math.min(4, rh*0.25));
+  var barPad = (rh - barH) / 2;
+  var jointW = Math.max(1, Math.min(2.5, rh*0.16));
+
+  var s = '<svg class="dg" viewBox="0 0 '+W+' '+h.toFixed(1)+'" role="img" aria-label="Ceiling paneling layout, '+rows+' rows, joints on trusses">';
+  s += '<text x="'+left+'" y="'+(top-12)+'" font-size="8" fill="'+TOK.brass+'" font-family="sans-serif">'+inp.offset+'″</text>';
   trusses.forEach(function(p,i){
     var x=ix(p);
-    s += '<line x1="'+x.toFixed(1)+'" y1="'+(top-8)+'" x2="'+x.toFixed(1)+'" y2="'+(top+rows*rh)+'" stroke="'+TOK.paperDim+'" stroke-width="1" stroke-dasharray="4 3"/>';
+    s += '<line x1="'+x.toFixed(1)+'" y1="'+(top-8)+'" x2="'+x.toFixed(1)+'" y2="'+(top+rows*rh).toFixed(1)+'" stroke="'+TOK.paperDim+'" stroke-width="1" stroke-dasharray="4 3"/>';
     s += '<text x="'+x.toFixed(1)+'" y="'+(top-12)+'" font-size="7" fill="'+TOK.paperFaint+'" font-family="sans-serif" text-anchor="middle">'+(i+1)+'</text>';
   });
   for (var r=0;r<rows;r++){
     var y=top+r*rh;
-    s += '<rect x="'+left+'" y="'+(y+2)+'" width="'+span+'" height="'+(rh-4)+'" fill="'+TOK.ink3+'" stroke="'+TOK.line+'" stroke-width="0.5"/>';
-    // row label — each row is its own cut now, so every row gets its letter
-    if ((rowJoints[r]||[]).length){
+    s += '<rect class="dgrow" x="'+left+'" y="'+(y+barPad).toFixed(1)+'" width="'+span+'" height="'+barH.toFixed(1)+'" fill="'+TOK.ink3+'" stroke="'+TOK.line+'" stroke-width="0.5"/>';
+    // row label — each row is its own cut, so every row gets its letter
+    if (showLetters && (rowJoints[r]||[]).length){
       var letter = (inp.unitRows && inp.unitRows>1) ? String.fromCharCode(65+(r % inp.unitRows)) : rowName(r);
-      s += '<text x="'+(left-3)+'" y="'+(y+rh-4)+'" font-size="7" fill="'+TOK.brass+'" font-family="sans-serif" text-anchor="end">'+letter+'</text>';
+      s += '<text x="'+(left-3)+'" y="'+(y+rh-barPad-0.5).toFixed(1)+'" font-size="'+labelFont.toFixed(1)+'" fill="'+TOK.brass+'" font-family="sans-serif" text-anchor="end">'+letter+'</text>';
     }
     (rowJoints[r]||[]).forEach(function(idx){
       if (trusses[idx]==null) return;
       var x=ix(trusses[idx]);
-      s += '<line x1="'+x.toFixed(1)+'" y1="'+(y+2)+'" x2="'+x.toFixed(1)+'" y2="'+(y+rh-2)+'" stroke="'+TOK.paper+'" stroke-width="2.5"/>';
+      s += '<line x1="'+x.toFixed(1)+'" y1="'+(y+barPad).toFixed(1)+'" x2="'+x.toFixed(1)+'" y2="'+(y+barPad+barH).toFixed(1)+'" stroke="'+TOK.paper+'" stroke-width="'+jointW.toFixed(2)+'"/>';
     });
-    if (rowStock && rowStock[r]!=null){
-      s += '<text x="'+(right-2)+'" y="'+(y+rh-4)+'" font-size="6.5" fill="'+TOK.brass+'" font-family="sans-serif" text-anchor="end">'+Math.round(rowStock[r]/12*10)/10+'\u2032</text>';
+    if (showStock && rowStock && rowStock[r]!=null){
+      s += '<text x="'+(right-2)+'" y="'+(y+rh-barPad-0.5).toFixed(1)+'" font-size="6.5" fill="'+TOK.brass+'" font-family="sans-serif" text-anchor="end">'+Math.round(rowStock[r]/12*10)/10+'′</text>';
     }
   }
-  s += '<text x="'+left+'" y="'+(top+rows*rh+16)+'" font-size="9" fill="'+TOK.paperFaint+'" font-family="sans-serif">nailing edge</text>';
-  s += '<text x="'+right+'" y="'+(top+rows*rh+16)+'" font-size="9" fill="'+TOK.paperFaint+'" font-family="sans-serif" text-anchor="end">nailing edge</text>';
-  if (rowJoints.length>rows){
-    s += '<text x="'+(W/2)+'" y="'+(top+rows*rh+16)+'" font-size="8" fill="'+TOK.paperFaint+'" font-family="sans-serif" text-anchor="middle">'+rows+' of '+rowJoints.length+' rows</text>';
-  }
+  var footY = top + rows*rh + 16;
+  s += '<text x="'+left+'" y="'+footY.toFixed(1)+'" font-size="9" fill="'+TOK.paperFaint+'" font-family="sans-serif">nailing edge</text>';
+  s += '<text x="'+right+'" y="'+footY.toFixed(1)+'" font-size="9" fill="'+TOK.paperFaint+'" font-family="sans-serif" text-anchor="end">nailing edge</text>';
+  /* The old footer read "10 of 29 rows". It is now a plain count, because the
+     two numbers can no longer differ — and because a count is what somebody
+     checking the drawing against the cut list actually wants to compare. */
+  s += '<text x="'+(W/2)+'" y="'+footY.toFixed(1)+'" font-size="8" fill="'+TOK.paperFaint+'" font-family="sans-serif" text-anchor="middle">'+rows+' row'+(rows===1?'':'s')+'</text>';
+  /* The one thing construction cannot guarantee: that the layout handed in has
+     as many rows as the cut list was built from. Say it on the drawing. */
+  if (mismatch !== null) s += diagMismatchBand(rows, mismatch, W, footY + 12);
   s += '</svg>';
   return s;
 }
@@ -1895,7 +2209,35 @@ function renderLayout(){
   var lbl=el("p","lbl");
   lbl.textContent = nOpts>1 ? ("Layout · option "+(STATE.active+1)+" of "+nOpts+" · "+(STATE.activeLabel||"")) : "Layout · single option (jointless)";
   card.appendChild(lbl);
-  var dw=el("div","diagwrap"); dw.innerHTML=drawDiagram(inp, STATE.rowJoints, STATE.rowStock, 10); card.appendChild(dw);
+  // No row count passed — there is no longer a way to ask for a partial ceiling.
+  // This call site is where the "10 of 29 rows" came from.
+  /* The drawing, and the way into the fullscreen page.
+
+     The inline card is 320 units wide and a 29-row ceiling compresses into it —
+     complete, but a lot of rows in a small space. Tapping opens the same drawing
+     full screen with rotate, pinch-zoom and fit, which is the parity the
+     flooring layout has had. The tap target is the whole picture, and a hint
+     says so: an affordance nobody can see is not one. */
+  var dw=el("div","diagwrap tappable");
+  dw.innerHTML=drawDiagram(inp, STATE.rowJoints, STATE.rowStock);
+  dw.setAttribute("role","button");
+  dw.setAttribute("tabindex","0");
+  dw.setAttribute("aria-label","Open the ceiling layout full screen");
+  function openPanelOverlay(){
+    // Re-rendered rather than re-parented: the inline copy stays on the card, so
+    // closing the overlay cannot leave a hole where the drawing used to be.
+    DrawingOverlay.open({
+      svg: drawDiagram(inp, STATE.rowJoints, STATE.rowStock, {maxHeight:DIAG_H_PRINT}),
+      contentW: 320,
+      contentH: 26 + STATE.rowJoints.length*diagRowHeight(STATE.rowJoints.length, DIAG_H_PRINT) + 26,
+      foot: STATE.rowJoints.length + " rows · pinch to zoom · drag to pan"
+    });
+  }
+  dw.addEventListener("click", openPanelOverlay);
+  dw.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openPanelOverlay(); } });
+  card.appendChild(dw);
+  var dhint=el("p","fl-hint"); dhint.textContent="Tap the drawing to zoom and rotate";
+  card.appendChild(dhint);
   var bar=el("div","optbar");
   var hasJ = STATE.rowJoints && STATE.rowJoints.some(function(j){ return j.length>0; });
   var who=el("span","who"); who.textContent=inp.rows+" rows · "+(hasJ?"non-repeating stagger":"jointless");
@@ -2042,7 +2384,10 @@ function buildPrintArea(){
   if (!STATE.rowJoints || STATE.shortage) return;
   var inp=STATE.inp;
   var title=el("div","print-title"); title.textContent="Stagger — paneling · "+fmtFt(inp.runIn)+" run × "+inp.rows+" rows"; area.appendChild(title);
-  var dw=el("div","diagwrap"); dw.innerHTML=drawDiagram(inp, STATE.rowJoints, STATE.rowStock, inp.rows); area.appendChild(dw);
+  // Paper, not a phone: a taller budget so a long ceiling stays readable
+  // rather than compressing to hairlines. Same split the flooring view keeps
+  // between .fl-scroll and .fl-print-diag.
+  var dw=el("div","diagwrap"); dw.innerHTML=drawDiagram(inp, STATE.rowJoints, STATE.rowStock, {maxHeight:DIAG_H_PRINT}); area.appendChild(dw);
   if (STATE.takeoff){
     var t=STATE.takeoff; var to=el("div","takeoff");
     var big=el("div","big"); big.textContent="~"+t.totalBoards+" boards · order ~"+t.withBuffer+" · waste "+t.wastePct+"% · "+t.leftover+" left"; to.appendChild(big);
@@ -2082,7 +2427,7 @@ function panelExportData(){
   return { kind:"Paneling",
            title:"Stagger \u2014 paneling \u00b7 "+fmtFt(inp.runIn)+" run \u00d7 "+inp.rows+" rows",
            meta:meta, rows:rows,
-           svg: drawDiagram(inp, STATE.rowJoints, STATE.rowStock, inp.rows),
+           svg: drawDiagram(inp, STATE.rowJoints, STATE.rowStock, {maxHeight:DIAG_H_PRINT}),
            fmtPiece: fmtFt };
 }
 

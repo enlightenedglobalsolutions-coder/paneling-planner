@@ -113,6 +113,37 @@ var ENGINES = {
     }
   },
 
+  /* The paneling DIAGRAM. Registered as its own engine because the bug it now
+     guards against was invisible to every other suite: the drawing disagreed
+     with the cut list on the same screen, and nothing that existed compared
+     them. It is a string builder with no DOM, so it slices cleanly.
+
+     `rowName` comes in as its own range rather than a preamble stub — it decides
+     the row letters actually drawn, and a second copy in the loader would agree
+     with the real one right up until somebody changed one of them.
+
+     TOK and textOn ARE stubbed: they are colour inputs, not the logic under
+     test, and `test_render_colours.js` is what guards the paint attributes. The
+     stubs are deliberately not real hex, so anything that tried to do arithmetic
+     on a colour here would break loudly rather than pass on a plausible value. */
+  paneldiag: {
+    module: 'panel_diagram.js',
+    ranges: [
+      ['/* RULE 3 — THE DRAWING AND THE CUT LIST CANNOT DISAGREE.', '// ---------- render layout ----------'],
+      ['function rowName(r){', 'function el(tag,cls){']
+    ],
+    preamble: 'var TOK = {brass:"T-brass",paperDim:"T-paperDim",paperFaint:"T-paperFaint",'
+            + 'ink3:"T-ink3",line:"T-line",paper:"T-paper",warn:"T-warn"};'
+            + ' function textOn(){ return "T-on"; }',
+    exports: ['drawDiagram', 'diagRowCount', 'diagRowHeight', 'diagMismatchBand', 'rowName'],
+    accessors: {
+      getRhMax:      'function(){ return DIAG_RH_MAX; }',
+      getRhMin:      'function(){ return DIAG_RH_MIN; }',
+      getScreenH:    'function(){ return DIAG_H_SCREEN; }',
+      getPrintH:     'function(){ return DIAG_H_PRINT; }'
+    }
+  },
+
   // Deck ordering — the Reshuffle layer. Deliberately OUTSIDE the fl slice
   // (which ends at readInputs) because it runs above the engine: it reorders
   // what the viewer cycles through and never changes what the engine produced.
